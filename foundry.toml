@@ -1,6 +1,23 @@
 [profile.default]
-src = "src"
-out = "out"
-libs = ["lib"]
+src = 'src'
+out = 'out'
+libs = ['lib']
+test = 'test'
+ffi = true
+ast = true
+build_info = true
+extra_output = ["storageLayout"]
+gas_reports = ["*"]
 
-# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+solc_version='0.8.27'
+evm_version='Cancun'
+optimizer = true
+optimizer-runs = 200
+via_ir = true
+
+[rpc_endpoints]
+goatTestnet = "${GOAT_TESTNET_RPC_URL}"
+bscTestnet = "${BSC_TESTNET_RPC_URL}"
+
+[etherscan]
+bscTestnet = { key = "${BSC_ETHERSCAN_API_KEY}" }
