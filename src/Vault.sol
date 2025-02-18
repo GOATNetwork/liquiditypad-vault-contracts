@@ -3,10 +3,9 @@ pragma solidity 0.8.27;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {TransferHelper} from "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 
 import {IToken} from "./interfaces/IToken.sol";
-import {IOFT} from "./interfaces/IOFT.sol";
+import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
 
 contract AssetVault is AccessControl, ReentrancyGuard {
     struct WithdrawalRequest {
@@ -67,8 +66,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE"); // TODO: more roles?
 
-    address public immutable lpToken;
-    address public immutable goatSafeAddress; // TODO: is this mutable?
+    bytes32 public immutable goatSafeAddress; // TODO: is this mutable?
 
     address[] public underlyingTokens;
 
@@ -76,7 +74,9 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
     mapping(address => bool) public isUnderlyingToken;
     mapping(address => uint8) public tokenDecimals;
-    mapping(address => address) public tokenBridge;
+    mapping(address => address lpToken) public lpTokens;
+    mapping(address => address lzBridge) public tokenBridge;
+    mapping(address => uint32 destEid) public bridgeEid;
 
     uint256 public depositFeeRate;
     uint256 public withdrawFeeRate;
@@ -91,16 +91,16 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     mapping(address => bool) public whitelistMode;
     mapping(address => mapping(address => bool)) public depositWhitelist;
 
-    constructor(address _lpToken, address _goatSafeAddress) {
+    constructor(address _goatSafeAddress) {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        lpToken = _lpToken;
-        goatSafeAddress = _goatSafeAddress;
+        goatSafeAddress = bytes32(uint256(uint160(_goatSafeAddress)));
     }
 
     function deposit(
         address _token,
-        uint256 _amount
-    ) external returns (uint256 mintAmount) {
+        uint256 _amount, // NOTE: dust, has to take into account token decimals
+        MessagingFee memory _fee
+    ) external payable returns (uint256 mintAmount) {
         require(isUnderlyingToken[_token], "Invalid token");
         require(!depositPaused[_token], "Deposit paused");
         require(_amount > 0, "Zero amount");
@@ -109,21 +109,33 @@ contract AssetVault is AccessControl, ReentrancyGuard {
             "Not whitelisted"
         );
 
-        TransferHelper.safeTransferFrom(
-            _token,
-            msg.sender,
-            address(this),
-            _amount
+        IToken(_token).transferFrom(msg.sender, address(this), _amount);
+
+        IOFT(tokenBridge[_token]).send{value: msg.value}(
+            _generateSendParam(_token, _amount),
+            _fee,
+            msg.sender
         );
 
-        // TODO:
-        // IOFT(tokenBridge[_token]).send(goatSafeAddress)
-
         mintAmount = _amount * 10 ** (18 - tokenDecimals[_token]);
-
-        IToken(lpToken).mint(msg.sender, mintAmount);
+        IToken(lpTokens[_token]).mint(msg.sender, mintAmount);
 
         emit Deposit(msg.sender, _token, _amount, mintAmount);
+    }
+
+    function _generateSendParam(
+        address _token,
+        uint256 _amount
+    ) internal view returns (SendParam memory sendParam) {
+        sendParam = SendParam({
+            dstEid: bridgeEid[_token],
+            to: goatSafeAddress,
+            amountLD: _amount,
+            minAmountLD: _amount,
+            extraOptions: "",
+            composeMsg: "",
+            oftCmd: ""
+        });
     }
 
     function requestWithdraw(
@@ -136,8 +148,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         require(isUnderlyingToken[_requestToken], "Invalid token");
         require(!withdrawPaused[_requestToken], "Paused");
 
-        TransferHelper.safeTransferFrom(
-            lpToken,
+        IToken(lpTokens[_requestToken]).transferFrom(
             msg.sender,
             address(this),
             _lpAmount
@@ -184,7 +195,10 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
         uint256 lpAmount = withdrawalRequest.lpAmount;
 
-        TransferHelper.safeTransfer(lpToken, requester, lpAmount);
+        IToken(lpTokens[withdrawalRequest.requestToken]).transfer(
+            requester,
+            lpAmount
+        );
 
         emit WithdrawalCancelled(
             requester,
@@ -200,11 +214,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         external
         nonReentrant
         onlyRole(ADMIN_ROLE)
-        returns (
-            address requestToken,
-            uint256 finalizedAmount,
-            uint256 lpAmount
-        )
+        returns (address requestToken, uint256 lpAmount)
     {
         uint256 index = idToWithdrawalRequest[_id];
         uint256 length = withdrawalRequests.length;
@@ -217,12 +227,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
         require(_id == withdrawalRequest.id, "Invalid id");
 
-        uint256 lpPrice = oracleConfigurator.getPrice(lpToken);
-
-        (requestToken, finalizedAmount, lpAmount) = _finalizeWithdraw(
-            withdrawalRequest,
-            lpPrice
-        );
+        (requestToken, lpAmount) = _finalizeWithdraw(withdrawalRequest);
 
         idToWithdrawalRequest[withdrawalRequests[length - 1].id] = index;
         idToWithdrawalRequest[_id] = type(uint256).max;
@@ -235,13 +240,11 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         uint256 length = withdrawalRequests.length;
         require(length > 0, "Empty array");
 
-        uint256 lpPrice = oracleConfigurator.getPrice(lpToken);
-
         uint256 i;
         for (i; i < length; i++) {
             WithdrawalRequest memory withdrawalRequest = withdrawalRequests[i];
 
-            _finalizeWithdraw(withdrawalRequest, lpPrice);
+            _finalizeWithdraw(withdrawalRequest);
 
             idToWithdrawalRequest[withdrawalRequest.id] = type(uint256).max;
         }
@@ -250,17 +253,8 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     }
 
     function _finalizeWithdraw(
-        WithdrawalRequest memory _withdrawalRequest,
-        uint256 _lpPrice
-    )
-        internal
-        returns (
-            address requestToken,
-            uint256 finalizedAmount,
-            uint256 lpAmount
-        )
-    {
-        uint256 minReceiveAmount = _withdrawalRequest.minReceiveAmount;
+        WithdrawalRequest memory _withdrawalRequest
+    ) internal returns (address requestToken, uint256 lpAmount) {
         requestToken = _withdrawalRequest.requestToken;
 
         lpAmount = _withdrawalRequest.lpAmount;
@@ -268,9 +262,9 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         address requester = _withdrawalRequest.requester;
         address receiver = _withdrawalRequest.receiver;
 
-        IToken(lpToken).burn(address(this), lpAmount);
+        IToken(lpTokens[requestToken]).burn(address(this), lpAmount);
 
-        TransferHelper.safeTransfer(address(requestToken), receiver, lpAmount);
+        IToken(requestToken).transfer(receiver, lpAmount);
         emit WithdrawalProcessed(requester, receiver, requestToken, lpAmount);
     }
 
@@ -279,14 +273,13 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         uint256[] memory _amounts
     ) external onlyRole(ADMIN_ROLE) {
         uint256 length = _tokens.length;
-        if (length == 0 || length != _amounts.length)
-            revert InvalidArrayLength();
+        require(length > 0 && length == _amounts.length, "Invalid inputs");
 
         uint256 i;
         for (i; i < length; i++) {
             address token = _tokens[i];
             uint256 amount = _amounts[i];
-            TransferHelper.safeTransfer(token, msg.sender, amount);
+            IToken(token).transfer(msg.sender, amount);
 
             emit WithdrawFromVault(msg.sender, token, amount);
         }
@@ -303,12 +296,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         for (uint8 i; i < length; i++) {
             address token = _tokens[i];
             uint256 amount = _amounts[i];
-            TransferHelper.safeTransferFrom(
-                token,
-                msg.sender,
-                address(this),
-                amount
-            );
+            IToken(token).transferFrom(msg.sender, address(this), amount);
 
             emit RepayToVault(msg.sender, token, amount);
         }
@@ -316,18 +304,23 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
     function addUnderlyingToken(
         address _token,
-        address _bridge
+        address _lpToken,
+        address _bridge,
+        uint32 _eid
     ) external onlyRole(ADMIN_ROLE) {
-        if (_token == address(0) || _token == lpToken) revert InvalidToken();
-        if (isUnderlyingToken[_token]) revert TokenAlreadyAdd();
-        if (oracleConfigurator.oracles(_token) == address(0))
-            revert InvalidOracle();
+        require(_token != address(0), "Invalid token");
+        require(!isUnderlyingToken[_token], "Token already added");
 
-        uint8 decimals = ERC20(_token).decimals();
-        if (decimals > 18) revert InvalidDecimals();
+        uint8 decimals = IToken(_token).decimals();
+        require(decimals <= 18, "Invalid decimals");
 
+        // Layer Zero bridge setup
         tokenBridge[_token] = _bridge;
-        ERC20(_token).approve(_bridge, type(uint256).max);
+        bridgeEid[_token] = _eid;
+        IToken(_token).approve(_bridge, type(uint256).max);
+
+        // underlying token setup
+        lpTokens[_token] = _lpToken;
         isUnderlyingToken[_token] = true;
         tokenDecimals[_token] = decimals;
         underlyingTokens.push(_token);
@@ -337,9 +330,12 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
     function removeUnderlyingToken(
         address _token
-    ) external onlyRole(SUPPORTED_TOKEN_OPERATION_ROLE) {
+    ) external onlyRole(ADMIN_ROLE) {
         require(isUnderlyingToken[_token], "Invalid token");
-        require(ERC20(_token).balanceOf(address(this)) == 0, "Non-empty token");
+        require(
+            IToken(_token).balanceOf(address(this)) == 0,
+            "Non-empty token"
+        );
 
         address[] memory tokens = underlyingTokens;
 

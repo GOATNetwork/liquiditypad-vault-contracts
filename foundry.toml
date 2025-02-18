@@ -15,6 +15,11 @@ optimizer = true
 optimizer-runs = 200
 via_ir = true
 
+remappings = [
+  '@openzeppelin/contracts/=lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/',
+  '@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/'
+]
+
 [rpc_endpoints]
 goatTestnet = "${GOAT_TESTNET_RPC_URL}"
 bscTestnet = "${BSC_TESTNET_RPC_URL}"
