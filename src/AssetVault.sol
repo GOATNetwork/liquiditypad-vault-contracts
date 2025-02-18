@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.27;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
@@ -6,13 +6,13 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 
 import {IToken} from "./interfaces/IToken.sol";
 import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
+import {console} from "forge-std/console.sol";
 
 contract AssetVault is AccessControl, ReentrancyGuard {
     struct WithdrawalRequest {
         address requester;
         address receiver;
         address requestToken;
-        uint256 id;
         uint256 lpAmount;
         uint256 timestamp;
     }
@@ -20,12 +20,6 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         address indexed account,
         address indexed token,
         uint256 tokenAmount,
-        uint256 lpAmount
-    );
-    event Deposit(
-        address indexed account,
-        address[] tokens,
-        uint256[] tokenAmounts,
         uint256 lpAmount
     );
     event WithdrawalRequested(
@@ -41,7 +35,9 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         uint256 id,
         uint256 lpAmount
     );
-    event WithdrawalProcessed(
+    event WithdrawalProcessed(uint256 id);
+    event Claim(
+        uint256 id,
         address indexed requester,
         address indexed receiver,
         address indexed requestToken,
@@ -63,6 +59,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     event SetWithdrawPause(address token, bool paused);
     event SetWhitelistMode(address token, bool whitelistMode);
     event SetWhitelist(address token, address user, bool allowed);
+    event SetRedeemWaitPeriod(uint256 redeemWaitPeriod);
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE"); // TODO: more roles?
 
@@ -70,7 +67,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
     address[] public underlyingTokens;
 
-    WithdrawalRequest[] public withdrawalRequests;
+    mapping(uint256 id => WithdrawalRequest) public withdrawalRequests;
 
     mapping(address => bool) public isUnderlyingToken;
     mapping(address => uint8) public tokenDecimals;
@@ -78,12 +75,9 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     mapping(address => address lzBridge) public tokenBridge;
     mapping(address => uint32 destEid) public bridgeEid;
 
-    uint256 public depositFeeRate;
-    uint256 public withdrawFeeRate;
-
-    mapping(uint256 => uint256) public idToWithdrawalRequest;
-
+    uint256 public redeemWaitPeriod;
     uint256 public withdrawalCounter;
+    uint256 public processedWithdrawalCounter;
 
     mapping(address => bool) public depositPaused;
     mapping(address => bool) public withdrawPaused;
@@ -94,6 +88,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     constructor(address _goatSafeAddress) {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         goatSafeAddress = bytes32(uint256(uint160(_goatSafeAddress)));
+        withdrawalCounter = 1;
     }
 
     function deposit(
@@ -155,17 +150,13 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         );
 
         id = withdrawalCounter++;
-        withdrawalRequests.push(
-            WithdrawalRequest({
-                requester: msg.sender,
-                receiver: _receiver,
-                requestToken: _requestToken,
-                id: id,
-                lpAmount: _lpAmount,
-                timestamp: block.timestamp
-            })
-        );
-        idToWithdrawalRequest[id] = withdrawalRequests.length - 1;
+        withdrawalRequests[id] = WithdrawalRequest({
+            requester: msg.sender,
+            receiver: _receiver,
+            requestToken: _requestToken,
+            lpAmount: _lpAmount,
+            timestamp: block.timestamp
+        });
 
         emit WithdrawalRequested(
             msg.sender,
@@ -177,95 +168,51 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     }
 
     function cancelWithdrawal(uint256 _id) external {
-        uint256 index = idToWithdrawalRequest[_id];
-        uint256 length = withdrawalRequests.length;
-        require(
-            index < length && _id < withdrawalCounter,
-            "Array index out of bounds"
-        );
-
-        WithdrawalRequest memory withdrawalRequest = withdrawalRequests[index];
+        WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
         address requester = withdrawalRequest.requester;
         require(msg.sender == requester, "Wrong requester");
 
-        idToWithdrawalRequest[_id] = type(uint256).max;
-        idToWithdrawalRequest[withdrawalRequests[length - 1].id] = index;
-        withdrawalRequests[index] = withdrawalRequests[length - 1];
-        withdrawalRequests.pop();
-
         uint256 lpAmount = withdrawalRequest.lpAmount;
-
         IToken(lpTokens[withdrawalRequest.requestToken]).transfer(
             requester,
             lpAmount
         );
 
+        delete withdrawalRequests[_id];
         emit WithdrawalCancelled(
             requester,
-            withdrawalRequest.requestToken,
+            withdrawalRequest.requestToken, // TODO: check this value
             _id,
             lpAmount
         );
     }
 
-    function processWithdrawal(
-        uint256 _id
-    )
-        external
-        nonReentrant
-        onlyRole(ADMIN_ROLE)
-        returns (address requestToken, uint256 lpAmount)
-    {
-        uint256 index = idToWithdrawalRequest[_id];
-        uint256 length = withdrawalRequests.length;
+    function processUntil(uint256 _id) external onlyRole(ADMIN_ROLE) {
         require(
-            index < length && _id < withdrawalCounter,
-            "Array index out of bounds"
+            _id > processedWithdrawalCounter && _id < withdrawalCounter,
+            "Invalid index"
         );
-
-        WithdrawalRequest memory withdrawalRequest = withdrawalRequests[index];
-
-        require(_id == withdrawalRequest.id, "Invalid id");
-
-        (requestToken, lpAmount) = _finalizeWithdraw(withdrawalRequest);
-
-        idToWithdrawalRequest[withdrawalRequests[length - 1].id] = index;
-        idToWithdrawalRequest[_id] = type(uint256).max;
-
-        withdrawalRequests[index] = withdrawalRequests[length - 1];
-        withdrawalRequests.pop();
+        require(
+            withdrawalRequests[_id].timestamp + redeemWaitPeriod <=
+                block.timestamp,
+            "Time not reached"
+        );
+        processedWithdrawalCounter = _id;
+        emit WithdrawalProcessed(_id);
     }
 
-    function processAllWithdrawal() external nonReentrant onlyRole(ADMIN_ROLE) {
-        uint256 length = withdrawalRequests.length;
-        require(length > 0, "Empty array");
+    function claim(uint256 _id) external {
+        WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
+        address requester = withdrawalRequest.requester;
+        require(msg.sender == requester, "Wrong requester");
 
-        uint256 i;
-        for (i; i < length; i++) {
-            WithdrawalRequest memory withdrawalRequest = withdrawalRequests[i];
-
-            _finalizeWithdraw(withdrawalRequest);
-
-            idToWithdrawalRequest[withdrawalRequest.id] = type(uint256).max;
-        }
-
-        delete withdrawalRequests;
-    }
-
-    function _finalizeWithdraw(
-        WithdrawalRequest memory _withdrawalRequest
-    ) internal returns (address requestToken, uint256 lpAmount) {
-        requestToken = _withdrawalRequest.requestToken;
-
-        lpAmount = _withdrawalRequest.lpAmount;
-
-        address requester = _withdrawalRequest.requester;
-        address receiver = _withdrawalRequest.receiver;
+        address requestToken = withdrawalRequest.requestToken;
+        address receiver = withdrawalRequest.receiver;
+        uint256 lpAmount = withdrawalRequest.lpAmount;
 
         IToken(lpTokens[requestToken]).burn(address(this), lpAmount);
-
         IToken(requestToken).transfer(receiver, lpAmount);
-        emit WithdrawalProcessed(requester, receiver, requestToken, lpAmount);
+        emit Claim(_id, requester, receiver, requestToken, lpAmount);
     }
 
     function withdrawFromVault(
@@ -349,7 +296,6 @@ contract AssetVault is AccessControl, ReentrancyGuard {
             }
         }
         isUnderlyingToken[_token] = false;
-        delete tokenDecimals[_token];
 
         emit TokenRemoved(_token);
     }
@@ -387,23 +333,18 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit SetWhitelist(_token, _minter, _allowed);
     }
 
+    function setRedeemWaitPeriod(
+        uint256 _redeemWaitPeriod
+    ) external onlyRole(ADMIN_ROLE) {
+        redeemWaitPeriod = _redeemWaitPeriod;
+        emit SetRedeemWaitPeriod(_redeemWaitPeriod);
+    }
+
     function getUnderlyings()
         external
         view
         returns (address[] memory underlyings)
     {
         return underlyingTokens;
-    }
-
-    function getRequestsLength() external view returns (uint256 length) {
-        length = withdrawalRequests.length;
-    }
-
-    function getRequestWithdrawals()
-        external
-        view
-        returns (WithdrawalRequest[] memory allWithdrawalRequests)
-    {
-        return withdrawalRequests;
     }
 }
