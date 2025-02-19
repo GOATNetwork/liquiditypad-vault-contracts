@@ -15,3 +15,6 @@ docs/
 
 # vs code
 .vscode
+
+# Foundry
+broadcast/

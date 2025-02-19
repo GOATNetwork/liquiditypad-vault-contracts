@@ -107,7 +107,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         IToken(_token).transferFrom(msg.sender, address(this), _amount);
 
         IOFT(tokenBridge[_token]).send{value: msg.value}(
-            _generateSendParam(_token, _amount),
+            generateSendParam(_token, _amount),
             _fee,
             msg.sender
         );
@@ -118,10 +118,10 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit Deposit(msg.sender, _token, _amount, mintAmount);
     }
 
-    function _generateSendParam(
+    function generateSendParam(
         address _token,
         uint256 _amount
-    ) internal view returns (SendParam memory sendParam) {
+    ) public view returns (SendParam memory sendParam) {
         sendParam = SendParam({
             dstEid: bridgeEid[_token],
             to: goatSafeAddress,

@@ -1,66 +1,8 @@
-## Foundry
+## Deployed Contract Addresses
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
-
-Foundry consists of:
-
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+| Contract            | BSC Testnet Address (40102)                |
+| ------------------- | ------------------------------------------ |
+| Vault               | 0x30cae239C3354909045eADd059A31b6693E45181 |
+| Token               | 0x9A359f736674913e405Eb64C2048c6293DC97CbF |
+| LP Token            | 0x2F535AFfC43C73548b34B2f64a7fbe6FF5477F26 |
+| OFT (detEid: 40356) | 0xa1952fFa805b9F2b711b61f005C6e56054cCA016 |

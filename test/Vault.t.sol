@@ -56,7 +56,11 @@ contract VaultTest is Test {
             nativeFee: 0.1 ether,
             lzTokenFee: 0
         });
-        vault.deposit(address(mockToken), DEFAULT_DEPOSIT_AMOUNT, fee);
+        vault.deposit{value: fee.nativeFee}(
+            address(mockToken),
+            DEFAULT_DEPOSIT_AMOUNT,
+            fee
+        );
         assertEq(lpToken.balanceOf(msgSender), DEFAULT_DEPOSIT_AMOUNT);
         assertEq(mockToken.balanceOf(msgSender), 0);
         assertEq(mockToken.balanceOf(address(oft)), DEFAULT_DEPOSIT_AMOUNT);
