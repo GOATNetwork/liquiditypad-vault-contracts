@@ -6,7 +6,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 
 import {IToken} from "./interfaces/IToken.sol";
 import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
-import {console} from "forge-std/console.sol";
+// import {console} from "forge-std/console.sol";
 
 contract AssetVault is AccessControl, ReentrancyGuard {
     struct WithdrawalRequest {
@@ -42,16 +42,6 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         address indexed receiver,
         address indexed requestToken,
         uint256 lpAmount
-    );
-    event WithdrawFromVault(
-        address indexed curator,
-        address indexed token,
-        uint256 amount
-    );
-    event RepayToVault(
-        address indexed curator,
-        address indexed token,
-        uint256 amount
     );
     event TokenAdded(address token);
     event TokenRemoved(address token);
@@ -116,21 +106,6 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         IToken(lpTokens[_token]).mint(msg.sender, mintAmount);
 
         emit Deposit(msg.sender, _token, _amount, mintAmount);
-    }
-
-    function generateSendParam(
-        address _token,
-        uint256 _amount
-    ) public view returns (SendParam memory sendParam) {
-        sendParam = SendParam({
-            dstEid: bridgeEid[_token],
-            to: goatSafeAddress,
-            amountLD: _amount,
-            minAmountLD: _amount,
-            extraOptions: "",
-            composeMsg: "",
-            oftCmd: ""
-        });
     }
 
     function requestWithdraw(
@@ -213,40 +188,6 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         IToken(lpTokens[requestToken]).burn(address(this), lpAmount);
         IToken(requestToken).transfer(receiver, lpAmount);
         emit Claim(_id, requester, receiver, requestToken, lpAmount);
-    }
-
-    function withdrawFromVault(
-        address[] memory _tokens,
-        uint256[] memory _amounts
-    ) external onlyRole(ADMIN_ROLE) {
-        uint256 length = _tokens.length;
-        require(length > 0 && length == _amounts.length, "Invalid inputs");
-
-        uint256 i;
-        for (i; i < length; i++) {
-            address token = _tokens[i];
-            uint256 amount = _amounts[i];
-            IToken(token).transfer(msg.sender, amount);
-
-            emit WithdrawFromVault(msg.sender, token, amount);
-        }
-    }
-
-    function repayToVault(
-        address[] memory _tokens,
-        uint256[] memory _amounts
-    ) external onlyRole(ADMIN_ROLE) {
-        uint256 length = _tokens.length;
-
-        require(length > 0 && length == _amounts.length, "Invalid inputs");
-
-        for (uint8 i; i < length; i++) {
-            address token = _tokens[i];
-            uint256 amount = _amounts[i];
-            IToken(token).transferFrom(msg.sender, address(this), amount);
-
-            emit RepayToVault(msg.sender, token, amount);
-        }
     }
 
     function addUnderlyingToken(
@@ -346,5 +287,20 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         returns (address[] memory underlyings)
     {
         return underlyingTokens;
+    }
+
+    function generateSendParam(
+        address _token,
+        uint256 _amount
+    ) public view returns (SendParam memory sendParam) {
+        sendParam = SendParam({
+            dstEid: bridgeEid[_token],
+            to: goatSafeAddress,
+            amountLD: _amount,
+            minAmountLD: _amount,
+            extraOptions: "",
+            composeMsg: "",
+            oftCmd: ""
+        });
     }
 }
