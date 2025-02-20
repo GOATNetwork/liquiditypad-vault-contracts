@@ -60,18 +60,20 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     event SetGoatSafeAddress(address newAddress);
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE"); // TODO: more roles?
-    uint32 public immutable eid;
+    uint32 public immutable eid; // Layer Zero destination endpoint id
 
+    // bytes32 format of token receiving address on Goat network
     bytes32 public goatSafeAddress;
+
     address[] public underlyingTokenList;
     mapping(address => UnderlyingToken) public underlyingTokens;
     mapping(address lpToken => address underlyingToken)
         public lpToUnderlyingTokens;
 
-    uint256 public redeemWaitPeriod;
-    uint256 public withdrawalCounter;
-    uint256 public processedWithdrawalCounter;
     mapping(uint256 id => WithdrawalRequest) public withdrawalRequests;
+    uint256 public redeemWaitPeriod; // wait time before the withdrawal can be processed
+    uint256 public withdrawalCounter; // next id for withdrawal
+    uint256 public processedWithdrawalCounter; // the index of processed withdrawal requests
 
     mapping(address => bool) public depositPaused;
     mapping(address => bool) public withdrawPaused;
@@ -282,8 +284,8 @@ contract AssetVault is AccessControl, ReentrancyGuard {
             "Non-empty LP token"
         );
 
+        // remove underlying token from list
         address[] memory tokens = underlyingTokenList;
-
         uint256 length = tokens.length;
         for (uint8 i; i < length; i++) {
             if (tokens[i] == _token) {
@@ -298,6 +300,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit TokenRemoved(_token);
     }
 
+    // set deposit pause state
     function setDepositPause(
         address _token,
         bool _pause
@@ -306,6 +309,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit SetDepositPause(_token, _pause);
     }
 
+    // set withdraw pause state
     function setWithdrawPause(
         address _token,
         bool _pause
@@ -314,6 +318,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit SetWithdrawPause(_token, _pause);
     }
 
+    // set token whitelist
     function setWhitelistMode(
         address _token,
         bool _applyWhitelist
@@ -322,6 +327,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit SetWhitelistMode(_token, _applyWhitelist);
     }
 
+    // set address whitelist
     function setWhitelistAddress(
         address _token,
         address _minter,
@@ -331,6 +337,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit SetWhitelist(_token, _minter, _allowed);
     }
 
+    // set redeem wait period
     function setRedeemWaitPeriod(
         uint256 _redeemWaitPeriod
     ) external onlyRole(ADMIN_ROLE) {
@@ -338,6 +345,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit SetRedeemWaitPeriod(_redeemWaitPeriod);
     }
 
+    // set token receiving address on Goat
     function setGoatSafeAddress(
         address _goatSafeAddress
     ) external onlyRole(ADMIN_ROLE) {
