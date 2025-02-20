@@ -9,6 +9,11 @@ import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
 // import {console} from "forge-std/console.sol";
 
 contract AssetVault is AccessControl, ReentrancyGuard {
+    struct UnderlyingToken {
+        uint8 decimals;
+        address lpToken;
+        address bridge;
+    }
     struct WithdrawalRequest {
         bool isCompleted;
         address requester;
@@ -17,6 +22,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         uint256 lpAmount;
         uint256 timestamp;
     }
+
     event Deposit(
         address indexed account,
         address indexed token,
@@ -44,7 +50,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         address indexed requestToken,
         uint256 lpAmount
     );
-    event TokenAdded(address token);
+    event TokenAdded(address token, address lpToken, address bridge);
     event TokenRemoved(address token);
     event SetDepositPause(address token, bool paused);
     event SetWithdrawPause(address token, bool paused);
@@ -57,18 +63,15 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     uint32 public immutable eid;
 
     bytes32 public goatSafeAddress;
-    address[] public underlyingTokens;
-
-    mapping(uint256 id => WithdrawalRequest) public withdrawalRequests;
-
-    mapping(address => bool) public isUnderlyingToken;
-    mapping(address => uint8) public tokenDecimals;
-    mapping(address => address lpToken) public lpTokens;
-    mapping(address => address lzBridge) public tokenBridge;
+    address[] public underlyingTokenList;
+    mapping(address => UnderlyingToken) public underlyingTokens;
+    mapping(address lpToken => address underlyingToken)
+        public lpToUnderlyingTokens;
 
     uint256 public redeemWaitPeriod;
     uint256 public withdrawalCounter;
     uint256 public processedWithdrawalCounter;
+    mapping(uint256 id => WithdrawalRequest) public withdrawalRequests;
 
     mapping(address => bool) public depositPaused;
     mapping(address => bool) public withdrawPaused;
@@ -83,12 +86,36 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         withdrawalCounter = 1;
     }
 
+    // return all underlying tokens
+    function getUnderlyings() external view returns (address[] memory) {
+        return underlyingTokenList;
+    }
+
+    // generate the `SendParam` used for bridging
+    function generateSendParam(
+        address _token,
+        uint256 _amount
+    ) public view returns (SendParam memory sendParam) {
+        sendParam = SendParam({
+            dstEid: eid,
+            to: goatSafeAddress,
+            amountLD: _amount,
+            minAmountLD: _amount,
+            extraOptions: "",
+            composeMsg: "",
+            oftCmd: ""
+        });
+    }
+
+    // deposit `_token` to Goat network
+    // @note must provide bridging fee through msg.value
     function deposit(
         address _token,
         uint256 _amount, // NOTE: dust, has to take into account token decimals
         MessagingFee memory _fee
-    ) external payable returns (uint256 mintAmount) {
-        require(isUnderlyingToken[_token], "Invalid token");
+    ) external payable {
+        UnderlyingToken memory tokenInfo = underlyingTokens[_token];
+        require(tokenInfo.lpToken != address(0), "Invalid token");
         require(!depositPaused[_token], "Deposit paused");
         require(_amount > 0, "Zero amount");
         require(
@@ -98,14 +125,14 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
         IToken(_token).transferFrom(msg.sender, address(this), _amount);
 
-        IOFT(tokenBridge[_token]).send{value: msg.value}(
+        IOFT(tokenInfo.bridge).send{value: msg.value}(
             generateSendParam(_token, _amount),
             _fee,
             msg.sender
         );
 
-        mintAmount = _amount * 10 ** (18 - tokenDecimals[_token]);
-        IToken(lpTokens[_token]).mint(msg.sender, mintAmount);
+        uint256 mintAmount = _amount * 10 ** (18 - tokenInfo.decimals);
+        IToken(tokenInfo.lpToken).mint(msg.sender, mintAmount);
 
         emit Deposit(msg.sender, _token, _amount, mintAmount);
     }
@@ -116,12 +143,15 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         address _receiver,
         uint256 _lpAmount
     ) external returns (uint256 id) {
+        require(
+            underlyingTokens[_requestToken].lpToken != address(0),
+            "Invalid token"
+        );
         require(_receiver != address(0), "Zero address");
         require(_lpAmount > 0, "Zero amount");
-        require(isUnderlyingToken[_requestToken], "Invalid token");
         require(!withdrawPaused[_requestToken], "Paused");
 
-        IToken(lpTokens[_requestToken]).transferFrom(
+        IToken(underlyingTokens[_requestToken].lpToken).transferFrom(
             msg.sender,
             address(this),
             _lpAmount
@@ -153,18 +183,15 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         address requester = withdrawalRequest.requester;
         require(msg.sender == requester, "Wrong requester");
 
-        uint256 lpAmount = withdrawalRequest.lpAmount;
-        IToken(lpTokens[withdrawalRequest.requestToken]).transfer(
-            requester,
-            lpAmount
-        );
+        IToken(underlyingTokens[withdrawalRequest.requestToken].lpToken)
+            .transfer(requester, withdrawalRequest.lpAmount);
 
         delete withdrawalRequests[_id];
         emit WithdrawalCancelled(
             requester,
             withdrawalRequest.requestToken, // TODO: check this value
             _id,
-            lpAmount
+            withdrawalRequest.lpAmount
         );
     }
 
@@ -187,6 +214,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     function claim(uint256 _id) external {
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
         require(!withdrawalRequest.isCompleted, "Already completed");
+
         address requester = withdrawalRequest.requester;
         require(msg.sender == requester, "Wrong requester");
         withdrawalRequests[_id].isCompleted = true;
@@ -195,7 +223,10 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         address receiver = withdrawalRequest.receiver;
         uint256 lpAmount = withdrawalRequest.lpAmount;
 
-        IToken(lpTokens[requestToken]).burn(address(this), lpAmount);
+        IToken(underlyingTokens[requestToken].lpToken).burn(
+            address(this),
+            lpAmount
+        );
         IToken(requestToken).transfer(receiver, lpAmount);
         emit Claim(_id, requester, receiver, requestToken, lpAmount);
     }
@@ -212,46 +243,57 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         address _bridge
     ) external onlyRole(ADMIN_ROLE) {
         require(_token != address(0), "Invalid token");
-        require(!isUnderlyingToken[_token], "Token already added");
+        require(
+            lpToUnderlyingTokens[_lpToken] == address(0),
+            "Existing LP token"
+        );
+        require(underlyingTokens[_token].decimals == 0, "Token exists");
 
         uint8 decimals = IToken(_token).decimals();
         require(decimals <= 18, "Invalid decimals");
 
-        // Layer Zero bridge setup
-        tokenBridge[_token] = _bridge;
+        // Set max allowance for Layer Zero bridge
         IToken(_token).approve(_bridge, type(uint256).max);
 
         // underlying token setup
-        lpTokens[_token] = _lpToken;
-        isUnderlyingToken[_token] = true;
-        tokenDecimals[_token] = decimals;
-        underlyingTokens.push(_token);
+        underlyingTokenList.push(_token);
+        underlyingTokens[_token] = UnderlyingToken({
+            decimals: decimals,
+            lpToken: _lpToken,
+            bridge: _bridge
+        });
+        lpToUnderlyingTokens[_lpToken] = _token;
 
-        emit TokenAdded(_token);
+        emit TokenAdded(_token, _lpToken, _bridge);
     }
 
     // remove an added underlying token
     function removeUnderlyingToken(
         address _token
     ) external onlyRole(ADMIN_ROLE) {
-        require(isUnderlyingToken[_token], "Invalid token");
+        address lpToken = underlyingTokens[_token].lpToken;
+        require(lpToken != address(0), "Token does not exist");
         require(
             IToken(_token).balanceOf(address(this)) == 0,
             "Non-empty token"
         );
+        require(
+            IToken(lpToken).balanceOf(address(this)) == 0,
+            "Non-empty LP token"
+        );
 
-        address[] memory tokens = underlyingTokens;
+        address[] memory tokens = underlyingTokenList;
 
         uint256 length = tokens.length;
-        uint256 i;
-        for (i; i < length; i++) {
+        for (uint8 i; i < length; i++) {
             if (tokens[i] == _token) {
-                underlyingTokens[i] = underlyingTokens[length - 1];
-                underlyingTokens.pop();
+                underlyingTokenList[i] = underlyingTokenList[length - 1];
+                underlyingTokenList.pop();
                 break;
             }
         }
-        isUnderlyingToken[_token] = false;
+        delete lpToUnderlyingTokens[lpToken];
+        delete underlyingTokens[_token];
 
         emit TokenRemoved(_token);
     }
@@ -301,29 +343,5 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     ) external onlyRole(ADMIN_ROLE) {
         goatSafeAddress = bytes32(uint256(uint160(_goatSafeAddress)));
         emit SetGoatSafeAddress(_goatSafeAddress);
-    }
-
-    function getUnderlyings()
-        external
-        view
-        returns (address[] memory underlyings)
-    {
-        return underlyingTokens;
-    }
-
-    // generate the `SendParam` used for bridging
-    function generateSendParam(
-        address _token,
-        uint256 _amount
-    ) public view returns (SendParam memory sendParam) {
-        sendParam = SendParam({
-            dstEid: eid,
-            to: goatSafeAddress,
-            amountLD: _amount,
-            minAmountLD: _amount,
-            extraOptions: "",
-            composeMsg: "",
-            oftCmd: ""
-        });
     }
 }
