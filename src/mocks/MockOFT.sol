@@ -11,10 +11,17 @@ contract MockOFT {
         token = _token;
     }
 
+    function quoteSend(
+        SendParam calldata, //_sendParam,
+        bool // _payInLzToken
+    ) external pure returns (MessagingFee memory fee) {
+        fee.nativeFee = 0.1 ether;
+    }
+
     function send(
         SendParam calldata _sendParam,
-        MessagingFee calldata _fee,
-        address _refundAddress
+        MessagingFee calldata, // _fee,
+        address // _refundAddress
     ) external payable returns (MessagingReceipt memory, OFTReceipt memory) {
         IERC20(token).transferFrom(
             msg.sender,

@@ -10,6 +10,7 @@ import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
 
 contract AssetVault is AccessControl, ReentrancyGuard {
     struct WithdrawalRequest {
+        bool isCompleted;
         address requester;
         address receiver;
         address requestToken;
@@ -50,11 +51,11 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     event SetWhitelistMode(address token, bool whitelistMode);
     event SetWhitelist(address token, address user, bool allowed);
     event SetRedeemWaitPeriod(uint256 redeemWaitPeriod);
+    event SetGoatSafeAddress(address newAddress);
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE"); // TODO: more roles?
 
-    bytes32 public immutable goatSafeAddress; // TODO: is this mutable?
-
+    bytes32 public goatSafeAddress;
     address[] public underlyingTokens;
 
     mapping(uint256 id => WithdrawalRequest) public withdrawalRequests;
@@ -108,6 +109,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit Deposit(msg.sender, _token, _amount, mintAmount);
     }
 
+    // request a withdrawal
     function requestWithdraw(
         address _requestToken,
         address _receiver,
@@ -126,6 +128,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
         id = withdrawalCounter++;
         withdrawalRequests[id] = WithdrawalRequest({
+            isCompleted: false,
             requester: msg.sender,
             receiver: _receiver,
             requestToken: _requestToken,
@@ -142,8 +145,10 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         );
     }
 
+    // cancel the requested withdrawal
     function cancelWithdrawal(uint256 _id) external {
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
+        require(!withdrawalRequest.isCompleted, "Already completed");
         address requester = withdrawalRequest.requester;
         require(msg.sender == requester, "Wrong requester");
 
@@ -162,6 +167,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         );
     }
 
+    // allow users to claim their requested withdrawals to `_id`th withdrawal
     function processUntil(uint256 _id) external onlyRole(ADMIN_ROLE) {
         require(
             _id > processedWithdrawalCounter && _id < withdrawalCounter,
@@ -176,10 +182,13 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit WithdrawalProcessed(_id);
     }
 
+    // claim processed withdrawal request
     function claim(uint256 _id) external {
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
+        require(!withdrawalRequest.isCompleted, "Already completed");
         address requester = withdrawalRequest.requester;
         require(msg.sender == requester, "Wrong requester");
+        withdrawalRequests[_id].isCompleted = true;
 
         address requestToken = withdrawalRequest.requestToken;
         address receiver = withdrawalRequest.receiver;
@@ -190,6 +199,13 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit Claim(_id, requester, receiver, requestToken, lpAmount);
     }
 
+    /**
+     * @dev add an underlying token
+     * @param _token The underlying token
+     * @param _lpToken The matching LP token
+     * @param _bridge The OFT/adapter for the underlying token
+     * @param _eid The eid of Goat network
+     */
     function addUnderlyingToken(
         address _token,
         address _lpToken,
@@ -216,6 +232,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit TokenAdded(_token);
     }
 
+    // remove an added underlying token
     function removeUnderlyingToken(
         address _token
     ) external onlyRole(ADMIN_ROLE) {
@@ -281,6 +298,13 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit SetRedeemWaitPeriod(_redeemWaitPeriod);
     }
 
+    function setGoatSafeAddress(
+        address _goatSafeAddress
+    ) external onlyRole(ADMIN_ROLE) {
+        goatSafeAddress = bytes32(uint256(uint160(_goatSafeAddress)));
+        emit SetGoatSafeAddress(_goatSafeAddress);
+    }
+
     function getUnderlyings()
         external
         view
@@ -289,6 +313,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         return underlyingTokens;
     }
 
+    // generate the `SendParam` used for bridging
     function generateSendParam(
         address _token,
         uint256 _amount
