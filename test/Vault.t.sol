@@ -27,7 +27,8 @@ contract VaultTest is Test {
         msgSender = address(this);
 
         // deploy mock OFT
-        vault = new AssetVault(msgSender);
+        uint32 testDestEid = 1;
+        vault = new AssetVault(testDestEid, msgSender);
         vault.grantRole(vault.ADMIN_ROLE(), msgSender);
         mockToken = new MockToken();
         lpToken = new LPToken("LP Token", "LPT");
@@ -38,8 +39,7 @@ contract VaultTest is Test {
         vault.addUnderlyingToken(
             address(mockToken),
             address(lpToken),
-            address(oft),
-            1
+            address(oft)
         );
         vault.setWhitelistMode(address(mockToken), true);
         vault.setRedeemWaitPeriod(1 days);

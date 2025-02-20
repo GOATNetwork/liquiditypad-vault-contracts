@@ -54,6 +54,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     event SetGoatSafeAddress(address newAddress);
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE"); // TODO: more roles?
+    uint32 public immutable eid;
 
     bytes32 public goatSafeAddress;
     address[] public underlyingTokens;
@@ -64,7 +65,6 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     mapping(address => uint8) public tokenDecimals;
     mapping(address => address lpToken) public lpTokens;
     mapping(address => address lzBridge) public tokenBridge;
-    mapping(address => uint32 destEid) public bridgeEid;
 
     uint256 public redeemWaitPeriod;
     uint256 public withdrawalCounter;
@@ -76,8 +76,9 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     mapping(address => bool) public whitelistMode;
     mapping(address => mapping(address => bool)) public depositWhitelist;
 
-    constructor(address _goatSafeAddress) {
+    constructor(uint32 _eid, address _goatSafeAddress) {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        eid = _eid;
         goatSafeAddress = bytes32(uint256(uint160(_goatSafeAddress)));
         withdrawalCounter = 1;
     }
@@ -204,13 +205,11 @@ contract AssetVault is AccessControl, ReentrancyGuard {
      * @param _token The underlying token
      * @param _lpToken The matching LP token
      * @param _bridge The OFT/adapter for the underlying token
-     * @param _eid The eid of Goat network
      */
     function addUnderlyingToken(
         address _token,
         address _lpToken,
-        address _bridge,
-        uint32 _eid
+        address _bridge
     ) external onlyRole(ADMIN_ROLE) {
         require(_token != address(0), "Invalid token");
         require(!isUnderlyingToken[_token], "Token already added");
@@ -220,7 +219,6 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
         // Layer Zero bridge setup
         tokenBridge[_token] = _bridge;
-        bridgeEid[_token] = _eid;
         IToken(_token).approve(_bridge, type(uint256).max);
 
         // underlying token setup
@@ -319,7 +317,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         uint256 _amount
     ) public view returns (SendParam memory sendParam) {
         sendParam = SendParam({
-            dstEid: bridgeEid[_token],
+            dstEid: eid,
             to: goatSafeAddress,
             amountLD: _amount,
             minAmountLD: _amount,
