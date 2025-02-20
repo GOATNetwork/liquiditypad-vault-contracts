@@ -43,13 +43,13 @@ contract VaultTest is Test {
         );
         vault.setWhitelistMode(address(mockToken), true);
         vault.setRedeemWaitPeriod(1 days);
+
+        // mock token setup
+        mockToken.mint(msgSender, DEFAULT_DEPOSIT_AMOUNT);
+        mockToken.approve(address(vault), type(uint256).max);
     }
 
     function test_StandardProcess() public {
-        // mock token
-        mockToken.mint(msgSender, DEFAULT_DEPOSIT_AMOUNT);
-        mockToken.approve(address(vault), type(uint256).max);
-
         // deposit
         assertEq(lpToken.balanceOf(msgSender), 0);
         MessagingFee memory fee = MessagingFee({
@@ -75,6 +75,7 @@ contract VaultTest is Test {
         );
         assertEq(withdrawId + 1, vault.withdrawalCounter());
         (
+            bool isCompleted,
             address requester,
             address receiver,
             address token,
@@ -82,8 +83,16 @@ contract VaultTest is Test {
             uint256 timestamp
         ) = vault.withdrawalRequests(withdrawId);
         assertEq(
-            abi.encodePacked(requester, receiver, token, amount, timestamp),
             abi.encodePacked(
+                isCompleted,
+                requester,
+                receiver,
+                token,
+                amount,
+                timestamp
+            ),
+            abi.encodePacked(
+                false,
                 msgSender,
                 msgSender,
                 address(mockToken),
@@ -105,5 +114,27 @@ contract VaultTest is Test {
         vault.claim(withdrawId);
         assertEq(lpToken.balanceOf(msgSender), 0);
         assertEq(mockToken.balanceOf(msgSender), DEFAULT_DEPOSIT_AMOUNT);
+    }
+
+    function test_DepositRevert() public {
+        MessagingFee memory fee = MessagingFee({
+            nativeFee: 0.1 ether,
+            lzTokenFee: 0
+        });
+
+        vm.expectRevert("Invalid token");
+        vault.deposit(address(1), DEFAULT_DEPOSIT_AMOUNT, fee);
+
+        vault.setDepositPause(address(mockToken), true);
+        vm.expectRevert("Deposit paused");
+        vault.deposit(address(mockToken), DEFAULT_DEPOSIT_AMOUNT, fee);
+        vault.setDepositPause(address(mockToken), false);
+
+        vm.expectRevert("Zero amount");
+        vault.deposit(address(mockToken), 0, fee);
+
+        vault.setWhitelistMode(address(mockToken), false);
+        vm.expectRevert("Not whitelisted");
+        vault.deposit(address(mockToken), DEFAULT_DEPOSIT_AMOUNT, fee);
     }
 }
