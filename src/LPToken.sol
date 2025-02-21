@@ -5,7 +5,8 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract LPToken is AccessControl, ERC20 {
-    event SetTransferSwitch(bool _transferSwitch);
+    event SetTransferSwitch(bool transferSwitch);
+    event SetTransferWhitelist(address user, bool isWhitelisted);
 
     bytes32 public constant MINT_ROLE = keccak256("MINT_ROLE");
 
@@ -32,6 +33,7 @@ contract LPToken is AccessControl, ERC20 {
         bool _isWhitelisted
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         transferWhitelist[_address] = _isWhitelisted;
+        emit SetTransferWhitelist(_address, _isWhitelisted);
     }
 
     function mint(address _to, uint256 _amount) external onlyRole(MINT_ROLE) {

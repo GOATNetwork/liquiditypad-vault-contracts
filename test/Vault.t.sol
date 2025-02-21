@@ -297,4 +297,27 @@ contract VaultTest is Test {
         vm.expectRevert("Non-empty token");
         vault.removeUnderlyingToken(address(mockToken));
     }
+
+    function test_LPToken() public {
+        address addr = address(1);
+        uint256 transferAmount = 1 ether;
+        lpToken.grantRole(lpToken.MINT_ROLE(), msgSender);
+
+        // fail: transfer disabled
+        vm.expectRevert("LPToken: transfer is paused");
+        lpToken.transfer(addr, transferAmount);
+
+        vm.expectRevert("LPToken: transfer is paused");
+        lpToken.transferFrom(addr, msgSender, transferAmount);
+
+        // success
+        lpToken.setTransferWhitelist(msgSender, true);
+        lpToken.mint(addr, transferAmount);
+        vm.prank(addr);
+        lpToken.approve(msgSender, transferAmount);
+        lpToken.transferFrom(addr, msgSender, transferAmount);
+
+        lpToken.setTransferSwitch(true);
+        lpToken.transfer(addr, transferAmount);
+    }
 }
