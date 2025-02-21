@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.27;
 
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
 import {IToken} from "./interfaces/IToken.sol";
 import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
 // import {console} from "forge-std/console.sol";
 
-contract AssetVault is AccessControl, ReentrancyGuard {
+contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     struct UnderlyingToken {
         uint8 decimals;
         address lpToken;
@@ -83,9 +83,14 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     mapping(address => bool) public whitelistMode;
     mapping(address => mapping(address => bool)) public depositWhitelist;
 
-    constructor(uint32 _eid, address _goatSafeAddress) {
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+    constructor(uint32 _eid) {
         eid = _eid;
+    }
+
+    function initialize(address _goatSafeAddress) public initializer {
+        __AccessControl_init();
+        __ReentrancyGuard_init();
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         goatSafeAddress = bytes32(uint256(uint160(_goatSafeAddress)));
         withdrawalCounter = 1;
     }
@@ -227,7 +232,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     }
 
     // claim processed withdrawal request
-    function claim(uint64 _id) external {
+    function claim(uint64 _id) external nonReentrant {
         require(_id <= processedWithdrawalCounter, "Not processed");
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
         require(!withdrawalRequest.isCompleted, "Already completed");

@@ -29,7 +29,8 @@ contract VaultTest is Test {
 
         // deploy mock OFT
         uint32 testDestEid = 1;
-        vault = new AssetVault(testDestEid, msgSender);
+        vault = new AssetVault(testDestEid);
+        vault.initialize(msgSender);
         vault.grantRole(vault.ADMIN_ROLE(), msgSender);
         mockToken = new MockToken();
         lpToken = new LPToken("LP Token", "LPT");

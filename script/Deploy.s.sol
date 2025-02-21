@@ -37,7 +37,8 @@ contract Deploy is Script {
     }
 
     function deploy() public {
-        AssetVault vault = new AssetVault(eid, deployer);
+        AssetVault vault = new AssetVault(eid);
+        vault.initialize(deployer);
         vault.grantRole(vault.ADMIN_ROLE(), deployer);
 
         LPToken lpToken = new LPToken("LP Token", "LPT");
