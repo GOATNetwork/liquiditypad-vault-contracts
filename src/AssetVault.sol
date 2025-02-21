@@ -6,25 +6,9 @@ import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/ut
 
 import {IToken} from "./interfaces/IToken.sol";
 import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
-// import {console} from "forge-std/console.sol";
 
 contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
-    struct UnderlyingToken {
-        uint8 decimals;
-        address lpToken;
-        address bridge;
-        uint256 minDepositAmount;
-        uint256 minWithdrawAmount;
-    }
-    struct WithdrawalRequest {
-        bool isCompleted;
-        address requester;
-        address receiver;
-        address requestToken;
-        uint32 timestamp;
-        uint256 lpAmount;
-    }
-
+    // events
     event Deposit(
         address indexed account,
         address indexed token,
@@ -61,7 +45,25 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     event SetRedeemWaitPeriod(uint32 redeemWaitPeriod);
     event SetGoatSafeAddress(address newAddress);
 
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE"); // TODO: more roles?
+    // structs
+    struct UnderlyingToken {
+        uint8 decimals;
+        address lpToken;
+        address bridge;
+        uint256 minDepositAmount;
+        uint256 minWithdrawAmount;
+    }
+
+    struct WithdrawalRequest {
+        bool isCompleted;
+        address requester;
+        address receiver;
+        address requestToken;
+        uint32 timestamp;
+        uint256 lpAmount;
+    }
+
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     uint32 public immutable eid; // Layer Zero destination endpoint id
 
     // bytes32 format of token receiving address on Goat network

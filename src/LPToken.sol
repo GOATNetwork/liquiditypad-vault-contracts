@@ -4,6 +4,7 @@ pragma solidity 0.8.27;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
+// LPToken is a simple ERC20 token with additional features for the AssetVault
 contract LPToken is AccessControl, ERC20 {
     event SetTransferSwitch(bool transferSwitch);
     event SetTransferWhitelist(address user, bool isWhitelisted);
@@ -21,6 +22,7 @@ contract LPToken is AccessControl, ERC20 {
         transferSwitch = false;
     }
 
+    // Set the transfer switch to pause or unpause all transfers
     function setTransferSwitch(
         bool _transferSwitch
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -28,6 +30,7 @@ contract LPToken is AccessControl, ERC20 {
         emit SetTransferSwitch(_transferSwitch);
     }
 
+    // Set the transfer whitelist for a specific address
     function setTransferWhitelist(
         address _address,
         bool _isWhitelisted
@@ -36,6 +39,7 @@ contract LPToken is AccessControl, ERC20 {
         emit SetTransferWhitelist(_address, _isWhitelisted);
     }
 
+    // Mint and burn functions for the AssetVault
     function mint(address _to, uint256 _amount) external onlyRole(MINT_ROLE) {
         _mint(_to, _amount);
     }
@@ -44,6 +48,7 @@ contract LPToken is AccessControl, ERC20 {
         _burn(_to, _amount);
     }
 
+    // Override the transfer and transferFrom functions to check the transfer switch
     function transfer(
         address to,
         uint256 value
