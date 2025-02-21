@@ -11,6 +11,8 @@ import {MockToken} from "../src/mocks/MockToken.sol";
 import {MockOFT} from "../src/mocks/MockOFT.sol";
 
 contract Deploy is Script {
+    uint256 public constant MIN_AMOUNT = 0.1 ether;
+
     address deployer;
 
     address token;
@@ -45,8 +47,13 @@ contract Deploy is Script {
         lpToken.setTransferWhitelist(address(vault), true);
         lpToken.grantRole(lpToken.MINT_ROLE(), address(vault));
 
-        vault.addUnderlyingToken(token, address(lpToken), oft, 0, 0);
-        vault.setWhitelistMode(token, true);
+        vault.addUnderlyingToken(
+            token,
+            address(lpToken),
+            oft,
+            MIN_AMOUNT,
+            MIN_AMOUNT
+        );
 
         console.log("Vault: ", address(vault));
         console.log("LP token: ", address(lpToken));

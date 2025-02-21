@@ -34,10 +34,10 @@ contract Deploy is Script {
     }
 
     function deploy() public {
-        uint256 amount = 5000000000000;
+        uint256 amount = 1000000000000000000;
         IOFT oftContract = IOFT(oft);
         AssetVault vault = AssetVault(
-            address(0x30cae239C3354909045eADd059A31b6693E45181)
+            address(0x1511164E0BCC1feAEba5f5bB2c1CdD5d55d68cab)
         );
         SendParam memory sendParam = vault.generateSendParam(amount);
         MessagingFee memory fee = oftContract.quoteSend(sendParam, false);
