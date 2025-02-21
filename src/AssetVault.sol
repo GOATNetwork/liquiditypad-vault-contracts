@@ -110,11 +110,21 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         });
     }
 
+    // get required fee for deposit
+    function getFee(
+        address _token,
+        uint256 _amount
+    ) public view returns (MessagingFee memory) {
+        UnderlyingToken memory tokenInfo = underlyingTokens[_token];
+        return
+            IOFT(tokenInfo.bridge).quoteSend(generateSendParam(_amount), false);
+    }
+
     // deposit `_token` to Goat network
-    // @NOTE must provide bridging fee through msg.value
+    // @NOTE: must provide bridging fee through msg.value
     function deposit(
         address _token,
-        uint256 _amount, // @NOTE: dust, has to take into account token decimals
+        uint256 _amount, // @NOTE: has to take into account dust
         MessagingFee memory _fee
     ) external payable {
         UnderlyingToken memory tokenInfo = underlyingTokens[_token];
@@ -122,7 +132,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         require(!depositPaused[_token], "Deposit paused");
         require(_amount >= tokenInfo.minDepositAmount, "Invalid amount");
         require(
-            whitelistMode[_token] || depositWhitelist[_token][msg.sender],
+            !whitelistMode[_token] || depositWhitelist[_token][msg.sender],
             "Not whitelisted"
         );
 
@@ -331,7 +341,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         emit SetWithdrawPause(_token, _pause);
     }
 
-    // set token whitelist
+    // set token whitelist mode
     function setWhitelistMode(
         address _token,
         bool _applyWhitelist
@@ -343,11 +353,11 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     // set address whitelist
     function setWhitelistAddress(
         address _token,
-        address _minter,
+        address _user,
         bool _allowed
     ) external onlyRole(ADMIN_ROLE) {
-        depositWhitelist[_token][_minter] = _allowed;
-        emit SetWhitelist(_token, _minter, _allowed);
+        depositWhitelist[_token][_user] = _allowed;
+        emit SetWhitelist(_token, _user, _allowed);
     }
 
     // set redeem wait period

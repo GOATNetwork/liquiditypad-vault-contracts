@@ -44,7 +44,6 @@ contract VaultTest is Test {
             MIN_AMOUNT,
             MIN_AMOUNT
         );
-        vault.setWhitelistMode(address(mockToken), true);
         vault.setRedeemWaitPeriod(1 days);
 
         // mock token setup
@@ -136,7 +135,7 @@ contract VaultTest is Test {
         vm.expectRevert("Invalid amount");
         vault.deposit(address(mockToken), 0, fee);
 
-        vault.setWhitelistMode(address(mockToken), false);
+        vault.setWhitelistMode(address(mockToken), true);
         vm.expectRevert("Not whitelisted");
         vault.deposit(address(mockToken), DEFAULT_DEPOSIT_AMOUNT, fee);
     }
