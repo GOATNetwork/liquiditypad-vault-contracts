@@ -34,7 +34,8 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address indexed requester,
         address indexed receiver,
         address indexed requestToken,
-        uint256 lpAmount
+        uint256 lpAmount,
+        uint256 underlyingAmount
     );
     event TokenAdded(address token, address lpToken, address bridge);
     event TokenRemoved(address token);
@@ -133,7 +134,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address _token,
         uint256 _amount, // @NOTE: has to take into account dust
         MessagingFee memory _fee
-    ) external payable {
+    ) external payable nonReentrant {
         UnderlyingToken memory tokenInfo = underlyingTokens[_token];
         require(tokenInfo.lpToken != address(0), "Invalid token");
         require(!depositPaused[_token], "Deposit paused");
@@ -245,8 +246,10 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         uint256 lpAmount = withdrawalRequest.lpAmount;
         address requestToken = withdrawalRequest.requestToken;
+        uint256 underlyingAmount = lpAmount /
+            (10 ** (18 - underlyingTokens[requestToken].decimals));
         require(
-            lpAmount <= IToken(requestToken).balanceOf(address(this)),
+            underlyingAmount <= IToken(requestToken).balanceOf(address(this)),
             "Insufficient tokens"
         );
         address receiver = withdrawalRequest.receiver;
@@ -255,8 +258,15 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             address(this),
             lpAmount
         );
-        IToken(requestToken).transfer(receiver, lpAmount);
-        emit Claim(_id, requester, receiver, requestToken, lpAmount);
+        IToken(requestToken).transfer(receiver, underlyingAmount);
+        emit Claim(
+            _id,
+            requester,
+            receiver,
+            requestToken,
+            lpAmount,
+            underlyingAmount
+        );
     }
 
     /**
@@ -277,7 +287,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             lpToUnderlyingTokens[_lpToken] == address(0),
             "Existing LP token"
         );
-        require(underlyingTokens[_token].decimals == 0, "Token exists");
+        require(underlyingTokens[_token].lpToken == address(0), "Token exists");
 
         uint8 decimals = IToken(_token).decimals();
         require(decimals <= 18, "Invalid decimals");

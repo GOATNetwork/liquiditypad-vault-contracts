@@ -14,14 +14,15 @@ import {MockOFT} from "../src/mocks/MockOFT.sol";
 contract VaultTest is Test {
     bytes32 public constant DEFAULT_ADMIN_ROLE = 0x00;
     bytes32 public constant ENTRYPOINT_ROLE = keccak256("ENTRYPOINT_ROLE");
-    uint256 public constant DEFAULT_DEPOSIT_AMOUNT = 1 ether;
-    uint256 public constant MIN_AMOUNT = 0.1 ether;
+    uint256 public constant MIN_AMOUNT = 1;
 
     AssetVault public vault;
     LPToken public lpToken;
     MockToken public mockToken;
     MockOFT public oft;
 
+    uint256 public depositAmount;
+    uint256 public lpAmount;
     address public thisAddr;
     address public msgSender;
 
@@ -50,7 +51,9 @@ contract VaultTest is Test {
         vault.setRedeemWaitPeriod(1 days);
 
         // mock token setup
-        mockToken.mint(msgSender, DEFAULT_DEPOSIT_AMOUNT);
+        depositAmount = 10 ** mockToken.decimals();
+        lpAmount = depositAmount * 10 ** (18 - mockToken.decimals());
+        mockToken.mint(msgSender, depositAmount);
         mockToken.approve(address(vault), type(uint256).max);
     }
 
@@ -59,25 +62,21 @@ contract VaultTest is Test {
         assertEq(lpToken.balanceOf(msgSender), 0);
         MessagingFee memory fee = vault.getFee(
             address(mockToken),
-            DEFAULT_DEPOSIT_AMOUNT
+            depositAmount
         );
         vault.deposit{value: fee.nativeFee}(
             address(mockToken),
-            DEFAULT_DEPOSIT_AMOUNT,
+            depositAmount,
             fee
         );
-        assertEq(lpToken.balanceOf(msgSender), DEFAULT_DEPOSIT_AMOUNT);
+        assertEq(lpToken.balanceOf(msgSender), lpAmount);
         assertEq(mockToken.balanceOf(msgSender), 0);
-        assertEq(mockToken.balanceOf(address(oft)), DEFAULT_DEPOSIT_AMOUNT);
+        assertEq(mockToken.balanceOf(address(oft)), depositAmount);
 
         // request withdraw
         uint64 withdrawId = vault.withdrawalCounter();
         lpToken.approve(address(vault), type(uint256).max);
-        vault.requestWithdraw(
-            address(mockToken),
-            msgSender,
-            DEFAULT_DEPOSIT_AMOUNT
-        );
+        vault.requestWithdraw(address(mockToken), msgSender, lpAmount);
         assertEq(withdrawId + 1, vault.withdrawalCounter());
         (
             bool isCompleted,
@@ -102,7 +101,7 @@ contract VaultTest is Test {
                 msgSender,
                 address(mockToken),
                 uint32(block.timestamp),
-                DEFAULT_DEPOSIT_AMOUNT
+                lpAmount
             )
         );
 
@@ -111,11 +110,7 @@ contract VaultTest is Test {
 
         // request a new withdrawal
         withdrawId = vault.withdrawalCounter();
-        vault.requestWithdraw(
-            address(mockToken),
-            msgSender,
-            DEFAULT_DEPOSIT_AMOUNT
-        );
+        vault.requestWithdraw(address(mockToken), msgSender, lpAmount);
 
         // process withdrawal
         assertEq(vault.processedWithdrawalCounter(), 0);
@@ -124,12 +119,12 @@ contract VaultTest is Test {
         assertEq(vault.processedWithdrawalCounter(), withdrawId);
 
         // bridge back to Vault
-        oft.bridgeOut(address(vault), DEFAULT_DEPOSIT_AMOUNT);
+        oft.bridgeOut(address(vault), depositAmount);
 
         // claim
         vault.claim(withdrawId);
         assertEq(lpToken.balanceOf(msgSender), 0);
-        assertEq(mockToken.balanceOf(msgSender), DEFAULT_DEPOSIT_AMOUNT);
+        assertEq(mockToken.balanceOf(msgSender), depositAmount);
 
         // remove underlying token
         vault.removeUnderlyingToken(address(mockToken));
@@ -141,16 +136,16 @@ contract VaultTest is Test {
     function test_Revert() public {
         MessagingFee memory fee = vault.getFee(
             address(mockToken),
-            DEFAULT_DEPOSIT_AMOUNT
+            depositAmount
         );
 
         // fail deposit cases
         vm.expectRevert("Invalid token");
-        vault.deposit(address(1), DEFAULT_DEPOSIT_AMOUNT, fee);
+        vault.deposit(address(1), depositAmount, fee);
 
         vault.setDepositPause(address(mockToken), true);
         vm.expectRevert("Deposit paused");
-        vault.deposit(address(mockToken), DEFAULT_DEPOSIT_AMOUNT, fee);
+        vault.deposit(address(mockToken), depositAmount, fee);
         vault.setDepositPause(address(mockToken), false);
 
         vm.expectRevert("Invalid amount");
@@ -158,47 +153,35 @@ contract VaultTest is Test {
 
         vault.setWhitelistMode(address(mockToken), true);
         vm.expectRevert("Not whitelisted");
-        vault.deposit(address(mockToken), DEFAULT_DEPOSIT_AMOUNT, fee);
+        vault.deposit(address(mockToken), depositAmount, fee);
 
         // success deposit
         vault.setWhitelistAddress(address(mockToken), msgSender, true);
         vault.deposit{value: fee.nativeFee}(
             address(mockToken),
-            DEFAULT_DEPOSIT_AMOUNT,
+            depositAmount,
             fee
         );
         uint64 withdrawId = vault.withdrawalCounter();
 
         // fail withdraw cases
         vm.expectRevert("Invalid token");
-        vault.requestWithdraw(address(0), msgSender, DEFAULT_DEPOSIT_AMOUNT);
+        vault.requestWithdraw(address(0), msgSender, lpAmount);
 
         vm.expectRevert("Zero address");
-        vault.requestWithdraw(
-            address(mockToken),
-            address(0),
-            DEFAULT_DEPOSIT_AMOUNT
-        );
+        vault.requestWithdraw(address(mockToken), address(0), lpAmount);
 
         vm.expectRevert("Invalid amount");
         vault.requestWithdraw(address(mockToken), msgSender, 0);
 
         vault.setWithdrawPause(address(mockToken), true);
         vm.expectRevert("Paused");
-        vault.requestWithdraw(
-            address(mockToken),
-            msgSender,
-            DEFAULT_DEPOSIT_AMOUNT
-        );
+        vault.requestWithdraw(address(mockToken), msgSender, lpAmount);
 
         vault.setWithdrawPause(address(mockToken), false);
         // success withdraw
         lpToken.approve(address(vault), type(uint256).max);
-        vault.requestWithdraw(
-            address(mockToken),
-            msgSender,
-            DEFAULT_DEPOSIT_AMOUNT
-        );
+        vault.requestWithdraw(address(mockToken), msgSender, lpAmount);
 
         // fail to cancel withdraw using different requester address
         vm.prank(address(1));
@@ -228,7 +211,7 @@ contract VaultTest is Test {
         vault.claim(withdrawId);
 
         // success claim
-        oft.bridgeOut(address(vault), DEFAULT_DEPOSIT_AMOUNT);
+        oft.bridgeOut(address(vault), depositAmount);
         vault.claim(withdrawId);
 
         // fail to operate on claimed withdrawal
