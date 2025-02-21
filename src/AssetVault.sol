@@ -220,7 +220,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function processUntil(uint64 _id) external onlyRole(ADMIN_ROLE) {
         require(
             _id > processedWithdrawalCounter && _id < withdrawalCounter,
-            "Invalid index"
+            "Invalid id"
         );
         require(
             withdrawalRequests[_id].timestamp + redeemWaitPeriod <=
@@ -244,7 +244,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 lpAmount = withdrawalRequest.lpAmount;
         address requestToken = withdrawalRequest.requestToken;
         require(
-            lpAmount >= IToken(requestToken).balanceOf(address(this)),
+            lpAmount <= IToken(requestToken).balanceOf(address(this)),
             "Insufficient tokens"
         );
         address receiver = withdrawalRequest.receiver;
@@ -377,6 +377,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function setGoatSafeAddress(
         address _goatSafeAddress
     ) external onlyRole(ADMIN_ROLE) {
+        require(_goatSafeAddress != address(0), "Zero address");
         goatSafeAddress = bytes32(uint256(uint160(_goatSafeAddress)));
         emit SetGoatSafeAddress(_goatSafeAddress);
     }
