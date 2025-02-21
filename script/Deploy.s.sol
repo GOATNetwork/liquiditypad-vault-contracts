@@ -44,7 +44,7 @@ contract Deploy is Script {
         lpToken.setTransferWhitelist(address(vault), true);
         lpToken.grantRole(lpToken.MINT_ROLE(), address(vault));
 
-        vault.addUnderlyingToken(token, address(lpToken), oft);
+        vault.addUnderlyingToken(token, address(lpToken), oft, 0, 0);
         vault.setWhitelistMode(token, true);
 
         console.log("Vault: ", address(vault));

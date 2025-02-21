@@ -13,14 +13,16 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         uint8 decimals;
         address lpToken;
         address bridge;
+        uint256 minDepositAmount;
+        uint256 minWithdrawAmount;
     }
     struct WithdrawalRequest {
         bool isCompleted;
         address requester;
         address receiver;
         address requestToken;
+        uint32 timestamp;
         uint256 lpAmount;
-        uint256 timestamp;
     }
 
     event Deposit(
@@ -56,7 +58,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     event SetWithdrawPause(address token, bool paused);
     event SetWhitelistMode(address token, bool whitelistMode);
     event SetWhitelist(address token, address user, bool allowed);
-    event SetRedeemWaitPeriod(uint256 redeemWaitPeriod);
+    event SetRedeemWaitPeriod(uint32 redeemWaitPeriod);
     event SetGoatSafeAddress(address newAddress);
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE"); // TODO: more roles?
@@ -71,9 +73,9 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         public lpToUnderlyingTokens;
 
     mapping(uint256 id => WithdrawalRequest) public withdrawalRequests;
-    uint256 public redeemWaitPeriod; // wait time before the withdrawal can be processed
-    uint256 public withdrawalCounter; // next id for withdrawal
-    uint256 public processedWithdrawalCounter; // the index of processed withdrawal requests
+    uint32 public redeemWaitPeriod; // wait time before the withdrawal can be processed
+    uint64 public withdrawalCounter; // next id for withdrawal, start from 1
+    uint64 public processedWithdrawalCounter; // the index of processed withdrawal requests
 
     mapping(address => bool) public depositPaused;
     mapping(address => bool) public withdrawPaused;
@@ -95,7 +97,6 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
     // generate the `SendParam` used for bridging
     function generateSendParam(
-        address _token,
         uint256 _amount
     ) public view returns (SendParam memory sendParam) {
         sendParam = SendParam({
@@ -110,16 +111,16 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     }
 
     // deposit `_token` to Goat network
-    // @note must provide bridging fee through msg.value
+    // @NOTE must provide bridging fee through msg.value
     function deposit(
         address _token,
-        uint256 _amount, // NOTE: dust, has to take into account token decimals
+        uint256 _amount, // @NOTE: dust, has to take into account token decimals
         MessagingFee memory _fee
     ) external payable {
         UnderlyingToken memory tokenInfo = underlyingTokens[_token];
         require(tokenInfo.lpToken != address(0), "Invalid token");
         require(!depositPaused[_token], "Deposit paused");
-        require(_amount > 0, "Zero amount");
+        require(_amount >= tokenInfo.minDepositAmount, "Invalid amount");
         require(
             whitelistMode[_token] || depositWhitelist[_token][msg.sender],
             "Not whitelisted"
@@ -128,7 +129,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         IToken(_token).transferFrom(msg.sender, address(this), _amount);
 
         IOFT(tokenInfo.bridge).send{value: msg.value}(
-            generateSendParam(_token, _amount),
+            generateSendParam(_amount),
             _fee,
             msg.sender
         );
@@ -150,7 +151,10 @@ contract AssetVault is AccessControl, ReentrancyGuard {
             "Invalid token"
         );
         require(_receiver != address(0), "Zero address");
-        require(_lpAmount > 0, "Zero amount");
+        require(
+            _lpAmount >= underlyingTokens[_requestToken].minWithdrawAmount,
+            "Invalid amount"
+        );
         require(!withdrawPaused[_requestToken], "Paused");
 
         IToken(underlyingTokens[_requestToken].lpToken).transferFrom(
@@ -165,8 +169,8 @@ contract AssetVault is AccessControl, ReentrancyGuard {
             requester: msg.sender,
             receiver: _receiver,
             requestToken: _requestToken,
-            lpAmount: _lpAmount,
-            timestamp: block.timestamp
+            timestamp: uint32(block.timestamp),
+            lpAmount: _lpAmount
         });
 
         emit WithdrawalRequested(
@@ -179,7 +183,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     }
 
     // cancel the requested withdrawal
-    function cancelWithdrawal(uint256 _id) external {
+    function cancelWithdrawal(uint64 _id) external {
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
         require(!withdrawalRequest.isCompleted, "Already completed");
         address requester = withdrawalRequest.requester;
@@ -198,7 +202,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     }
 
     // allow users to claim their requested withdrawals to `_id`th withdrawal
-    function processUntil(uint256 _id) external onlyRole(ADMIN_ROLE) {
+    function processUntil(uint64 _id) external onlyRole(ADMIN_ROLE) {
         require(
             _id > processedWithdrawalCounter && _id < withdrawalCounter,
             "Invalid index"
@@ -213,7 +217,8 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     }
 
     // claim processed withdrawal request
-    function claim(uint256 _id) external {
+    function claim(uint64 _id) external {
+        require(_id <= processedWithdrawalCounter, "Not processed");
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
         require(!withdrawalRequest.isCompleted, "Already completed");
 
@@ -221,9 +226,13 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         require(msg.sender == requester, "Wrong requester");
         withdrawalRequests[_id].isCompleted = true;
 
-        address requestToken = withdrawalRequest.requestToken;
-        address receiver = withdrawalRequest.receiver;
         uint256 lpAmount = withdrawalRequest.lpAmount;
+        address requestToken = withdrawalRequest.requestToken;
+        require(
+            lpAmount >= IToken(requestToken).balanceOf(address(this)),
+            "Insufficient tokens"
+        );
+        address receiver = withdrawalRequest.receiver;
 
         IToken(underlyingTokens[requestToken].lpToken).burn(
             address(this),
@@ -242,7 +251,9 @@ contract AssetVault is AccessControl, ReentrancyGuard {
     function addUnderlyingToken(
         address _token,
         address _lpToken,
-        address _bridge
+        address _bridge,
+        uint256 _minDepositAmount,
+        uint256 _minWithdrawAmount
     ) external onlyRole(ADMIN_ROLE) {
         require(_token != address(0), "Invalid token");
         require(
@@ -262,7 +273,9 @@ contract AssetVault is AccessControl, ReentrancyGuard {
         underlyingTokens[_token] = UnderlyingToken({
             decimals: decimals,
             lpToken: _lpToken,
-            bridge: _bridge
+            bridge: _bridge,
+            minDepositAmount: _minDepositAmount,
+            minWithdrawAmount: _minWithdrawAmount
         });
         lpToUnderlyingTokens[_lpToken] = _token;
 
@@ -339,7 +352,7 @@ contract AssetVault is AccessControl, ReentrancyGuard {
 
     // set redeem wait period
     function setRedeemWaitPeriod(
-        uint256 _redeemWaitPeriod
+        uint32 _redeemWaitPeriod
     ) external onlyRole(ADMIN_ROLE) {
         redeemWaitPeriod = _redeemWaitPeriod;
         emit SetRedeemWaitPeriod(_redeemWaitPeriod);

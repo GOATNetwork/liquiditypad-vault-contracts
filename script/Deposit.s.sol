@@ -39,7 +39,7 @@ contract Deploy is Script {
         AssetVault vault = AssetVault(
             address(0x30cae239C3354909045eADd059A31b6693E45181)
         );
-        SendParam memory sendParam = vault.generateSendParam(token, amount);
+        SendParam memory sendParam = vault.generateSendParam(amount);
         MessagingFee memory fee = oftContract.quoteSend(sendParam, false);
         console.log(fee.nativeFee, deployer.balance / fee.nativeFee);
         vault.deposit{value: fee.nativeFee}(token, amount, fee);

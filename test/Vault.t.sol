@@ -14,6 +14,7 @@ contract VaultTest is Test {
     bytes32 public constant DEFAULT_ADMIN_ROLE = 0x00;
     bytes32 public constant ENTRYPOINT_ROLE = keccak256("ENTRYPOINT_ROLE");
     uint256 public constant DEFAULT_DEPOSIT_AMOUNT = 1 ether;
+    uint256 public constant MIN_AMOUNT = 0.1 ether;
 
     AssetVault public vault;
     LPToken public lpToken;
@@ -39,7 +40,9 @@ contract VaultTest is Test {
         vault.addUnderlyingToken(
             address(mockToken),
             address(lpToken),
-            address(oft)
+            address(oft),
+            MIN_AMOUNT,
+            MIN_AMOUNT
         );
         vault.setWhitelistMode(address(mockToken), true);
         vault.setRedeemWaitPeriod(1 days);
@@ -66,7 +69,7 @@ contract VaultTest is Test {
         assertEq(mockToken.balanceOf(address(oft)), DEFAULT_DEPOSIT_AMOUNT);
 
         // request withdraw
-        uint256 withdrawId = vault.withdrawalCounter();
+        uint64 withdrawId = vault.withdrawalCounter();
         lpToken.approve(address(vault), type(uint256).max);
         vault.requestWithdraw(
             address(mockToken),
@@ -79,8 +82,8 @@ contract VaultTest is Test {
             address requester,
             address receiver,
             address token,
-            uint256 amount,
-            uint256 timestamp
+            uint32 timestamp,
+            uint256 amount
         ) = vault.withdrawalRequests(withdrawId);
         assertEq(
             abi.encodePacked(
@@ -88,16 +91,16 @@ contract VaultTest is Test {
                 requester,
                 receiver,
                 token,
-                amount,
-                timestamp
+                timestamp,
+                amount
             ),
             abi.encodePacked(
                 false,
                 msgSender,
                 msgSender,
                 address(mockToken),
-                DEFAULT_DEPOSIT_AMOUNT,
-                block.timestamp
+                uint32(block.timestamp),
+                DEFAULT_DEPOSIT_AMOUNT
             )
         );
 
@@ -130,7 +133,7 @@ contract VaultTest is Test {
         vault.deposit(address(mockToken), DEFAULT_DEPOSIT_AMOUNT, fee);
         vault.setDepositPause(address(mockToken), false);
 
-        vm.expectRevert("Zero amount");
+        vm.expectRevert("Invalid amount");
         vault.deposit(address(mockToken), 0, fee);
 
         vault.setWhitelistMode(address(mockToken), false);
