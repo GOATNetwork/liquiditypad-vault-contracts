@@ -11,17 +11,20 @@ import {MockToken} from "../src/mocks/MockToken.sol";
 import {MockOFT} from "../src/mocks/MockOFT.sol";
 
 contract Deploy is Script {
-    uint256 public constant MIN_AMOUNT = 0.1 ether;
+    uint256 public constant MIN_AMOUNT = 1;
 
     address deployer;
 
     address token;
+    address lpTokenAddr;
     address oft;
     uint32 eid;
 
     function setUp() public {
         token = vm.envAddress("TOKEN_ADDR");
         console.log("token addr: ", token);
+        lpTokenAddr = vm.envAddress("LP_TOKEN_ADDR");
+        console.log("LP token addr: ", lpTokenAddr);
         oft = vm.envAddress("OFT_ADDR");
         console.log("OFT addr: ", oft);
         eid = uint32(vm.envUint("ENDPOINT_ID"));
@@ -43,19 +46,18 @@ contract Deploy is Script {
         vault.initialize(deployer);
         vault.grantRole(vault.ADMIN_ROLE(), deployer);
 
-        LPToken lpToken = new LPToken("LP Token", "LPT");
+        LPToken lpToken = LPToken(lpTokenAddr);
         lpToken.setTransferWhitelist(address(vault), true);
         lpToken.grantRole(lpToken.MINT_ROLE(), address(vault));
 
         vault.addUnderlyingToken(
             token,
-            address(lpToken),
+            lpTokenAddr,
             oft,
             MIN_AMOUNT,
             MIN_AMOUNT
         );
 
         console.log("Vault: ", address(vault));
-        console.log("LP token: ", address(lpToken));
     }
 }

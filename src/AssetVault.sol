@@ -51,8 +51,8 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint8 decimals;
         address lpToken;
         address bridge;
-        uint256 minDepositAmount;
-        uint256 minWithdrawAmount;
+        uint256 minDepositAmount; // underlying token amount
+        uint256 minWithdrawAmount; // lp token amount
     }
 
     struct WithdrawalRequest {
