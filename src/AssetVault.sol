@@ -8,6 +8,10 @@ import {LPToken} from "./LPToken.sol";
 import {IToken} from "./interfaces/IToken.sol";
 import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
 
+/**
+ * @title AssetVault
+ * @dev A vault contract for bridging assets to the Goat network
+ */
 contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     // events
     event Deposit(
@@ -91,6 +95,10 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         eid = _eid;
     }
 
+    /**
+     * @dev Initializes the contract with the given Goat safe address.
+     * @param _goatSafeAddress The Goat safe address.
+     */
     function initialize(address _goatSafeAddress) public initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
@@ -99,12 +107,19 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         withdrawalCounter = 1;
     }
 
-    // return all underlying tokens
+    /**
+     * @dev Returns all underlying tokens.
+     * @return An array of underlying token addresses.
+     */
     function getUnderlyings() external view returns (address[] memory) {
         return underlyingTokenList;
     }
 
-    // generate the `SendParam` used for bridging
+    /**
+     * @dev Generates the `SendParam` used for bridging.
+     * @param _amount The amount to be bridged.
+     * @return The generated `SendParam`.
+     */
     function generateSendParam(
         uint256 _amount
     ) public view returns (SendParam memory sendParam) {
@@ -119,7 +134,12 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         });
     }
 
-    // get required fee for deposit
+    /**
+     * @dev Gets the required fee for deposit.
+     * @param _token The token address.
+     * @param _amount The amount to be deposited.
+     * @return The required messaging fee.
+     */
     function getFee(
         address _token,
         uint256 _amount
@@ -129,11 +149,15 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             IOFT(tokenInfo.bridge).quoteSend(generateSendParam(_amount), false);
     }
 
-    // deposit `_token` to Goat network
-    // @NOTE: must provide bridging fee through msg.value
+    /**
+     * @dev Deposits `_token` to Goat network.
+     * @param _token The token address.
+     * @param _amount The amount to be deposited.
+     * @param _fee The messaging fee.
+     */
     function deposit(
         address _token,
-        uint256 _amount, // @NOTE: has to take into account dust
+        uint256 _amount,
         MessagingFee memory _fee
     ) external payable nonReentrant {
         UnderlyingToken memory tokenInfo = underlyingTokens[_token];
@@ -161,7 +185,13 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit Deposit(msg.sender, _token, _amount, mintAmount);
     }
 
-    // request a withdrawal
+    /**
+     * @dev Requests a withdrawal.
+     * @param _requestToken The token to be withdrawn.
+     * @param _receiver The address to receive the withdrawn tokens.
+     * @param _lpAmount The amount of LP tokens to be withdrawn.
+     * @return The ID of the withdrawal request.
+     */
     function requestWithdraw(
         address _requestToken,
         address _receiver,
@@ -203,7 +233,10 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         );
     }
 
-    // cancel the requested withdrawal
+    /**
+     * @dev Cancels the requested withdrawal.
+     * @param _id The ID of the withdrawal request to be cancelled.
+     */
     function cancelWithdrawal(uint64 _id) external {
         require(_id > processedWithdrawalCounter, "Already processed");
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
@@ -216,13 +249,16 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         delete withdrawalRequests[_id];
         emit WithdrawalCancelled(
             requester,
-            withdrawalRequest.requestToken, // TODO: check this value
+            withdrawalRequest.requestToken,
             _id,
             withdrawalRequest.lpAmount
         );
     }
 
-    // allow users to claim their requested withdrawals to `_id`th withdrawal
+    /**
+     * @dev Allows users to claim their requested withdrawals up to `_id`th withdrawal.
+     * @param _id The ID up to which withdrawal request to be processed.
+     */
     function processUntil(uint64 _id) external onlyRole(ADMIN_ROLE) {
         require(
             _id > processedWithdrawalCounter && _id < withdrawalCounter,
@@ -232,7 +268,11 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit WithdrawalProcessed(_id);
     }
 
-    // claim processed withdrawal request
+    /**
+     * @dev Claims the processed withdrawal request.
+     * @param _id The ID of the withdrawal request to be claimed.
+     * @notice The requester can claim the withdrawal after the redeem wait period.
+     */
     function claim(uint64 _id) external nonReentrant {
         require(_id <= processedWithdrawalCounter, "Not processed");
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
@@ -272,9 +312,11 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev add an underlying token
-     * @param _token The underlying token
-     * @param _bridge The OFT/adapter for the underlying token
+     * @dev Adds an underlying token.
+     * @param _token The underlying token address.
+     * @param _bridge The OFT/adapter for the underlying token.
+     * @param _minDepositAmount The minimum deposit amount, in underlying token.
+     * @param _minWithdrawAmount The minimum withdraw amount, in LP token.
      */
     function addUnderlyingToken(
         address _token,
@@ -310,7 +352,10 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit TokenAdded(_token, address(lpToken), _bridge);
     }
 
-    // remove an added underlying token
+    /**
+     * @dev Removes an added underlying token.
+     * @param _token The underlying token address to be removed.
+     */
     function removeUnderlyingToken(
         address _token
     ) external onlyRole(ADMIN_ROLE) {
@@ -341,7 +386,11 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit TokenRemoved(_token);
     }
 
-    // set deposit pause state
+    /**
+     * @dev Sets the deposit pause state.
+     * @param _token The token address.
+     * @param _pause The pause state.
+     */
     function setDepositPause(
         address _token,
         bool _pause
@@ -350,7 +399,11 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit SetDepositPause(_token, _pause);
     }
 
-    // set withdraw pause state
+    /**
+     * @dev Sets the withdraw pause state.
+     * @param _token The token address.
+     * @param _pause The pause state.
+     */
     function setWithdrawPause(
         address _token,
         bool _pause
@@ -359,7 +412,11 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit SetWithdrawPause(_token, _pause);
     }
 
-    // set token whitelist mode
+    /**
+     * @dev Sets the token whitelist mode.
+     * @param _token The token address.
+     * @param _applyWhitelist The whitelist mode state.
+     */
     function setWhitelistMode(
         address _token,
         bool _applyWhitelist
@@ -368,7 +425,12 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit SetWhitelistMode(_token, _applyWhitelist);
     }
 
-    // set address whitelist
+    /**
+     * @dev Sets the address whitelist.
+     * @param _token The token address.
+     * @param _user The user address.
+     * @param _allowed The whitelist state.
+     */
     function setWhitelistAddress(
         address _token,
         address _user,
@@ -378,7 +440,10 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit SetWhitelist(_token, _user, _allowed);
     }
 
-    // set redeem wait period
+    /**
+     * @dev Sets the wait period before the user can claim.
+     * @param _redeemWaitPeriod The new wait period in seconds.
+     */
     function setRedeemWaitPeriod(
         uint32 _redeemWaitPeriod
     ) external onlyRole(ADMIN_ROLE) {
@@ -386,7 +451,10 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit SetRedeemWaitPeriod(_redeemWaitPeriod);
     }
 
-    // set token receiving address on Goat
+    /**
+     * @dev Sets the token receiving address on Goat.
+     * @param _goatSafeAddress The new Goat safe address.
+     */
     function setGoatSafeAddress(
         address _goatSafeAddress
     ) external onlyRole(ADMIN_ROLE) {
