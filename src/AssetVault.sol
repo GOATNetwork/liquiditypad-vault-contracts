@@ -3,6 +3,7 @@ pragma solidity 0.8.27;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import {LPToken} from "./LPToken.sol";
 import {IToken} from "./interfaces/IToken.sol";
@@ -16,6 +17,8 @@ import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
  * balances when underlying token balances change due to rebasing events.
  */
 contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     // events
     event Deposit(
         address indexed account,
@@ -79,7 +82,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     // bytes32 format of token receiving address on Goat network
     bytes32 public goatSafeAddress;
 
-    address[] public underlyingTokenList;
+    EnumerableSet.AddressSet private underlyingTokenSet;
     mapping(address => UnderlyingToken) public underlyingTokens;
     mapping(address lpToken => address underlyingToken)
         public lpToUnderlyingTokens;
@@ -122,7 +125,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return An array of underlying token addresses.
      */
     function getUnderlyings() external view returns (address[] memory) {
-        return underlyingTokenList;
+        return underlyingTokenSet.values();
     }
 
     /**
@@ -345,7 +348,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         );
 
         // underlying token setup
-        underlyingTokenList.push(_token);
+        underlyingTokenSet.add(_token);
         underlyingTokens[_token] = UnderlyingToken({
             decimals: decimals,
             lpToken: address(lpToken),
@@ -377,15 +380,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         );
 
         // remove underlying token from list
-        address[] memory tokens = underlyingTokenList;
-        uint256 length = tokens.length;
-        for (uint256 i; i < length; i++) {
-            if (tokens[i] == _token) {
-                underlyingTokenList[i] = underlyingTokenList[length - 1];
-                underlyingTokenList.pop();
-                break;
-            }
-        }
+        underlyingTokenSet.remove(_token);
         delete lpToUnderlyingTokens[lpToken];
         delete underlyingTokens[_token];
 
