@@ -11,6 +11,9 @@ import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
 /**
  * @title AssetVault
  * @dev A vault contract for bridging assets to the Goat network
+ * @dev This contract is not compatible with rebasing tokens. Using rebasing tokens
+ * will result in incorrect LP token ratios as the contract does not adjust LP token
+ * balances when underlying token balances change due to rebasing events.
  */
 contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     // events
