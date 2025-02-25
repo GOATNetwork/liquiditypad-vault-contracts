@@ -225,11 +225,6 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             _id > processedWithdrawalCounter && _id < withdrawalCounter,
             "Invalid id"
         );
-        require(
-            withdrawalRequests[_id].timestamp + redeemWaitPeriod <=
-                block.timestamp,
-            "Time not reached"
-        );
         processedWithdrawalCounter = _id;
         emit WithdrawalProcessed(_id);
     }
@@ -239,6 +234,10 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         require(_id <= processedWithdrawalCounter, "Not processed");
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
         require(!withdrawalRequest.isCompleted, "Already completed");
+        require(
+            withdrawalRequest.timestamp + redeemWaitPeriod <= block.timestamp,
+            "Time not reached"
+        );
 
         address requester = withdrawalRequest.requester;
         require(msg.sender == requester, "Wrong requester");
