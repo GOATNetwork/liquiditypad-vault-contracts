@@ -203,6 +203,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     // cancel the requested withdrawal
     function cancelWithdrawal(uint64 _id) external {
+        require(_id > processedWithdrawalCounter, "Already processed");
         WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
         require(!withdrawalRequest.isCompleted, "Already completed");
         address requester = withdrawalRequest.requester;
