@@ -46,8 +46,8 @@ contract LPToken is AccessControl, ERC20 {
         _mint(_to, _amount);
     }
 
-    function burn(address _to, uint256 _amount) external onlyRole(MINT_ROLE) {
-        _burn(_to, _amount);
+    function burn(address _from, uint256 _amount) external onlyRole(MINT_ROLE) {
+        _burn(_from, _amount);
     }
 
     // Override the transfer and transferFrom functions to check the transfer switch
