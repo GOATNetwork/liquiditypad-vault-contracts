@@ -144,6 +144,8 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             !whitelistMode[_token] || depositWhitelist[_token][msg.sender],
             "Not whitelisted"
         );
+        require(_fee.lzTokenFee == 0, "LZ token fee not supported");
+        require(_fee.nativeFee == msg.value, "Invalid native fee");
 
         IToken(_token).transferFrom(msg.sender, address(this), _amount);
 
