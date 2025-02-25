@@ -16,15 +16,12 @@ contract Deploy is Script {
     address deployer;
 
     address token;
-    address lpTokenAddr;
     address oft;
     uint32 eid;
 
     function setUp() public {
         token = vm.envAddress("TOKEN_ADDR");
         console.log("token addr: ", token);
-        lpTokenAddr = vm.envAddress("LP_TOKEN_ADDR");
-        console.log("LP token addr: ", lpTokenAddr);
         oft = vm.envAddress("OFT_ADDR");
         console.log("OFT addr: ", oft);
         eid = uint32(vm.envUint("ENDPOINT_ID"));
@@ -43,20 +40,10 @@ contract Deploy is Script {
 
     function deploy() public {
         AssetVault vault = new AssetVault(eid);
-        vault.initialize(deployer);
+        vault.initialize(deployer, 0);
         vault.grantRole(vault.ADMIN_ROLE(), deployer);
 
-        LPToken lpToken = LPToken(lpTokenAddr);
-        lpToken.setTransferWhitelist(address(vault), true);
-        lpToken.grantRole(lpToken.MINT_ROLE(), address(vault));
-
-        vault.addUnderlyingToken(
-            token,
-            lpTokenAddr,
-            oft,
-            MIN_AMOUNT,
-            MIN_AMOUNT
-        );
+        vault.addUnderlyingToken(token, oft, MIN_AMOUNT, MIN_AMOUNT);
 
         console.log("Vault: ", address(vault));
     }

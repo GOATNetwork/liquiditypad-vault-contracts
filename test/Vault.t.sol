@@ -32,21 +32,21 @@ contract VaultTest is Test {
         // deploy mock OFT
         uint32 testDestEid = 1;
         vault = new AssetVault(testDestEid);
-        vault.initialize(msgSender);
+        vault.initialize(msgSender, 0);
         vault.grantRole(vault.ADMIN_ROLE(), msgSender);
         mockToken = new MockToken();
-        lpToken = new LPToken("LP Token", "LPT");
-        lpToken.setTransferWhitelist(address(vault), true);
-        lpToken.grantRole(lpToken.MINT_ROLE(), address(vault));
         oft = new MockOFT(address(mockToken));
 
         vault.addUnderlyingToken(
             address(mockToken),
-            address(lpToken),
             address(oft),
             MIN_AMOUNT,
             MIN_AMOUNT
         );
+        (, address lpTokenAddr, , , ) = vault.underlyingTokens(
+            address(mockToken)
+        );
+        lpToken = LPToken(lpTokenAddr);
         assertEq(vault.getUnderlyings().length, 1);
         vault.setRedeemWaitPeriod(1 days);
 
@@ -73,11 +73,11 @@ contract VaultTest is Test {
         assertEq(mockToken.balanceOf(msgSender), 0);
         assertEq(mockToken.balanceOf(address(oft)), depositAmount);
 
-        // request withdraw
-        uint64 withdrawId = vault.withdrawalCounter();
+        // request redeem
+        uint64 redeemId = vault.redeemCounter();
         lpToken.approve(address(vault), type(uint256).max);
-        vault.requestWithdraw(address(mockToken), msgSender, lpAmount);
-        assertEq(withdrawId + 1, vault.withdrawalCounter());
+        vault.requestRedeem(address(mockToken), msgSender, lpAmount);
+        assertEq(redeemId + 1, vault.redeemCounter());
         (
             bool isCompleted,
             address requester,
@@ -85,7 +85,7 @@ contract VaultTest is Test {
             address token,
             uint32 timestamp,
             uint256 amount
-        ) = vault.withdrawalRequests(withdrawId);
+        ) = vault.redeemRequests(redeemId);
         assertEq(
             abi.encodePacked(
                 isCompleted,
@@ -105,24 +105,24 @@ contract VaultTest is Test {
             )
         );
 
-        // cancel withdrawal
-        vault.cancelWithdrawal(withdrawId);
+        // cancel redeem
+        vault.cancelRedeem(redeemId);
 
-        // request a new withdrawal
-        withdrawId = vault.withdrawalCounter();
-        vault.requestWithdraw(address(mockToken), msgSender, lpAmount);
+        // request a new redeem
+        redeemId = vault.redeemCounter();
+        vault.requestRedeem(address(mockToken), msgSender, lpAmount);
 
-        // process withdrawal
-        assertEq(vault.processedWithdrawalCounter(), 0);
+        // process redeem
+        assertEq(vault.processedRedeemCounter(), 0);
         skip(1 days); // redeem wait period
-        vault.processUntil(withdrawId);
-        assertEq(vault.processedWithdrawalCounter(), withdrawId);
+        vault.processUntil(redeemId);
+        assertEq(vault.processedRedeemCounter(), redeemId);
 
         // bridge back to Vault
         oft.bridgeOut(address(vault), depositAmount);
 
         // claim
-        vault.claim(withdrawId);
+        vault.claim(redeemId);
         assertEq(lpToken.balanceOf(msgSender), 0);
         assertEq(mockToken.balanceOf(msgSender), depositAmount);
 
@@ -162,64 +162,64 @@ contract VaultTest is Test {
             depositAmount,
             fee
         );
-        uint64 withdrawId = vault.withdrawalCounter();
+        uint64 redeemId = vault.redeemCounter();
 
-        // fail withdraw cases
+        // fail redeem cases
         vm.expectRevert("Invalid token");
-        vault.requestWithdraw(address(0), msgSender, lpAmount);
+        vault.requestRedeem(address(0), msgSender, lpAmount);
 
         vm.expectRevert("Zero address");
-        vault.requestWithdraw(address(mockToken), address(0), lpAmount);
+        vault.requestRedeem(address(mockToken), address(0), lpAmount);
 
         vm.expectRevert("Invalid amount");
-        vault.requestWithdraw(address(mockToken), msgSender, 0);
+        vault.requestRedeem(address(mockToken), msgSender, 0);
 
-        vault.setWithdrawPause(address(mockToken), true);
+        vault.setRedeemPause(address(mockToken), true);
         vm.expectRevert("Paused");
-        vault.requestWithdraw(address(mockToken), msgSender, lpAmount);
+        vault.requestRedeem(address(mockToken), msgSender, lpAmount);
 
-        vault.setWithdrawPause(address(mockToken), false);
-        // success withdraw
+        vault.setRedeemPause(address(mockToken), false);
+        // success redeem
         lpToken.approve(address(vault), type(uint256).max);
-        vault.requestWithdraw(address(mockToken), msgSender, lpAmount);
+        vault.requestRedeem(address(mockToken), msgSender, lpAmount);
 
-        // fail to cancel withdraw using different requester address
+        // fail to cancel redeem using different requester address
         vm.prank(address(1));
         vm.expectRevert("Wrong requester");
-        vault.cancelWithdrawal(withdrawId);
+        vault.cancelRedeem(redeemId);
 
         // fail process cases
         vm.expectRevert("Invalid id");
-        vault.processUntil(withdrawId + 1);
+        vault.processUntil(redeemId + 1);
 
-        vm.expectRevert("Time not reached");
-        vault.processUntil(withdrawId);
-
-        // success process withdrawal
-        skip(1 days);
-        vault.processUntil(withdrawId);
+        // success process redeem
+        vault.processUntil(redeemId);
 
         // fail claim cases
         vm.expectRevert("Not processed");
-        vault.claim(withdrawId + 1);
+        vault.claim(redeemId + 1);
 
+        vm.expectRevert("Time not reached");
+        vault.claim(redeemId);
+
+        skip(1 days);
         vm.prank(address(1));
         vm.expectRevert("Wrong requester");
-        vault.claim(withdrawId);
+        vault.claim(redeemId);
 
         vm.expectRevert("Insufficient tokens");
-        vault.claim(withdrawId);
+        vault.claim(redeemId);
 
         // success claim
         oft.bridgeOut(address(vault), depositAmount);
-        vault.claim(withdrawId);
+        vault.claim(redeemId);
 
-        // fail to operate on claimed withdrawal
-        vm.expectRevert("Already completed");
-        vault.cancelWithdrawal(withdrawId);
+        // fail to operate on claimed redeem
+        vm.expectRevert("Already processed");
+        vault.cancelRedeem(redeemId);
 
         vm.expectRevert("Already completed");
-        vault.claim(withdrawId);
+        vault.claim(redeemId);
 
         // fail due to setting zero address
         vm.expectRevert("Zero address");
@@ -233,16 +233,6 @@ contract VaultTest is Test {
         vm.expectRevert("Invalid token");
         vault.addUnderlyingToken(
             address(0),
-            address(lpToken),
-            address(oft),
-            MIN_AMOUNT,
-            MIN_AMOUNT
-        );
-
-        vm.expectRevert("Existing LP token");
-        vault.addUnderlyingToken(
-            address(tempToken),
-            address(lpToken),
             address(oft),
             MIN_AMOUNT,
             MIN_AMOUNT
@@ -251,7 +241,6 @@ contract VaultTest is Test {
         vm.expectRevert("Token exists");
         vault.addUnderlyingToken(
             address(mockToken),
-            address(tempToken),
             address(oft),
             MIN_AMOUNT,
             MIN_AMOUNT
@@ -261,7 +250,6 @@ contract VaultTest is Test {
         vm.expectRevert("Invalid decimals");
         vault.addUnderlyingToken(
             address(invalidToken),
-            address(tempToken),
             address(oft),
             MIN_AMOUNT,
             MIN_AMOUNT
@@ -294,7 +282,7 @@ contract VaultTest is Test {
         lpToken.transferFrom(addr, msgSender, transferAmount);
 
         // success
-        lpToken.setTransferWhitelist(msgSender, true);
+        lpToken.setVaultAddress(msgSender);
         lpToken.mint(addr, transferAmount);
         vm.prank(addr);
         lpToken.approve(msgSender, transferAmount);
