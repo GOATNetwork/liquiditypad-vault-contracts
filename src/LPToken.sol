@@ -7,12 +7,12 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 // LPToken is a simple ERC20 token with additional features for the AssetVault
 contract LPToken is AccessControl, ERC20 {
     event SetTransferSwitch(bool transferSwitch);
-    event SetTransferWhitelist(address user, bool isWhitelisted);
+    event SetVaultAddress(address vaultAddress);
 
     bytes32 public constant MINT_ROLE = keccak256("MINT_ROLE");
 
+    address public vaultAddress;
     bool public transferSwitch;
-    mapping(address => bool) public transferWhitelist;
 
     constructor(
         address _admin,
@@ -21,6 +21,7 @@ contract LPToken is AccessControl, ERC20 {
     ) ERC20(_name, _symbol) {
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(MINT_ROLE, msg.sender);
+        vaultAddress = msg.sender;
         transferSwitch = false;
     }
 
@@ -33,12 +34,11 @@ contract LPToken is AccessControl, ERC20 {
     }
 
     // Set the transfer whitelist for a specific address
-    function setTransferWhitelist(
-        address _address,
-        bool _isWhitelisted
+    function setVaultAddress(
+        address _address
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        transferWhitelist[_address] = _isWhitelisted;
-        emit SetTransferWhitelist(_address, _isWhitelisted);
+        vaultAddress = _address;
+        emit SetVaultAddress(_address);
     }
 
     // Mint and burn functions for the AssetVault
@@ -56,7 +56,7 @@ contract LPToken is AccessControl, ERC20 {
         uint256 value
     ) public override returns (bool) {
         require(
-            transferSwitch || transferWhitelist[msg.sender],
+            transferSwitch || msg.sender == vaultAddress,
             "LPToken: transfer is paused"
         );
         return super.transfer(to, value);
@@ -68,7 +68,7 @@ contract LPToken is AccessControl, ERC20 {
         uint256 value
     ) public override returns (bool) {
         require(
-            transferSwitch || transferWhitelist[msg.sender],
+            transferSwitch || msg.sender == vaultAddress,
             "LPToken: transfer is paused"
         );
         return super.transferFrom(from, to, value);

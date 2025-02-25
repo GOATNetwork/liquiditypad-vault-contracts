@@ -301,14 +301,14 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         underlyingTokenList.push(_token);
         underlyingTokens[_token] = UnderlyingToken({
             decimals: decimals,
-            lpToken: _lpToken,
+            lpToken: address(lpToken),
             bridge: _bridge,
             minDepositAmount: _minDepositAmount,
             minWithdrawAmount: _minWithdrawAmount
         });
-        lpToUnderlyingTokens[_lpToken] = _token;
+        lpToUnderlyingTokens[address(lpToken)] = _token;
 
-        emit TokenAdded(_token, _lpToken, _bridge);
+        emit TokenAdded(_token, address(lpToken), _bridge);
     }
 
     // remove an added underlying token
