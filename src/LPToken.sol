@@ -15,10 +15,12 @@ contract LPToken is AccessControl, ERC20 {
     mapping(address => bool) public transferWhitelist;
 
     constructor(
+        address _admin,
         string memory _name,
         string memory _symbol
     ) ERC20(_name, _symbol) {
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+        _grantRole(MINT_ROLE, msg.sender);
         transferSwitch = false;
     }
 

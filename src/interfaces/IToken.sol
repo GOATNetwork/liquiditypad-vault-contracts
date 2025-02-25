@@ -5,6 +5,8 @@ interface IToken {
     // standard ERC20 getter
     function decimals() external view returns (uint8);
     function balanceOf(address account) external view returns (uint256);
+    function name() external view returns (string memory);
+    function symbol() external view returns (string memory);
 
     // standard ERC20 methods
     function approve(address spender, uint256 value) external returns (bool);

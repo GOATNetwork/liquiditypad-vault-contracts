@@ -4,6 +4,7 @@ pragma solidity 0.8.27;
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
+import {LPToken} from "./LPToken.sol";
 import {IToken} from "./interfaces/IToken.sol";
 import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
 
@@ -271,21 +272,15 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /**
      * @dev add an underlying token
      * @param _token The underlying token
-     * @param _lpToken The matching LP token
      * @param _bridge The OFT/adapter for the underlying token
      */
     function addUnderlyingToken(
         address _token,
-        address _lpToken,
         address _bridge,
         uint256 _minDepositAmount,
         uint256 _minWithdrawAmount
     ) external onlyRole(ADMIN_ROLE) {
         require(_token != address(0), "Invalid token");
-        require(
-            lpToUnderlyingTokens[_lpToken] == address(0),
-            "Existing LP token"
-        );
         require(underlyingTokens[_token].lpToken == address(0), "Token exists");
 
         uint8 decimals = IToken(_token).decimals();
@@ -293,6 +288,11 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         // Set max allowance for Layer Zero bridge
         IToken(_token).approve(_bridge, type(uint256).max);
+        LPToken lpToken = new LPToken(
+            msg.sender,
+            string(abi.encodePacked("Goat ", IToken(_token).name())), // FIXME: temporary name
+            string(abi.encodePacked("G", IToken(_token).symbol()))
+        );
 
         // underlying token setup
         underlyingTokenList.push(_token);
