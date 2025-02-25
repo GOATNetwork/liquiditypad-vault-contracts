@@ -18,34 +18,34 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address indexed account,
         address indexed token,
         uint256 tokenAmount,
-        uint256 lpAmount
+        uint256 share
     );
-    event WithdrawalRequested(
+    event RedeemRequested(
         address indexed requester,
         address indexed receiver,
         address indexed requestToken,
         uint256 id,
-        uint256 lpAmount
+        uint256 share
     );
-    event WithdrawalCancelled(
+    event RedeemCancelled(
         address indexed requester,
         address indexed requestToken,
         uint256 id,
-        uint256 lpAmount
+        uint256 share
     );
-    event WithdrawalProcessed(uint256 id);
+    event RedeemProcessed(uint256 id);
     event Claim(
         uint256 id,
         address indexed requester,
         address indexed receiver,
         address indexed requestToken,
-        uint256 lpAmount,
+        uint256 share,
         uint256 underlyingAmount
     );
     event TokenAdded(address token, address lpToken, address bridge);
     event TokenRemoved(address token);
     event SetDepositPause(address token, bool paused);
-    event SetWithdrawPause(address token, bool paused);
+    event SetRedeemPause(address token, bool paused);
     event SetWhitelistMode(address token, bool whitelistMode);
     event SetWhitelist(address token, address user, bool allowed);
     event SetRedeemWaitPeriod(uint32 redeemWaitPeriod);
@@ -57,16 +57,16 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address lpToken;
         address bridge;
         uint256 minDepositAmount; // underlying token amount
-        uint256 minWithdrawAmount; // lp token amount
+        uint256 minRedeemAmount; // lp token amount
     }
 
-    struct WithdrawalRequest {
+    struct RedeemRequest {
         bool isCompleted;
         address requester;
         address receiver;
         address requestToken;
         uint32 timestamp;
-        uint256 lpAmount;
+        uint256 share;
     }
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -80,13 +80,13 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     mapping(address lpToken => address underlyingToken)
         public lpToUnderlyingTokens;
 
-    mapping(uint256 id => WithdrawalRequest) public withdrawalRequests;
-    uint32 public redeemWaitPeriod; // wait time before the withdrawal can be processed
-    uint64 public withdrawalCounter; // next id for withdrawal, start from 1
-    uint64 public processedWithdrawalCounter; // the index of processed withdrawal requests
+    mapping(uint256 id => RedeemRequest) public redeemRequests;
+    uint32 public redeemWaitPeriod; // wait time before the redeem can be processed
+    uint64 public redeemCounter; // next id for redeem, start from 1
+    uint64 public processedRedeemCounter; // the index of processed redeem requests
 
     mapping(address => bool) public depositPaused;
-    mapping(address => bool) public withdrawPaused;
+    mapping(address => bool) public redeemPaused;
 
     mapping(address => bool) public whitelistMode;
     mapping(address => mapping(address => bool)) public depositWhitelist;
@@ -104,7 +104,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         __ReentrancyGuard_init();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         goatSafeAddress = bytes32(uint256(uint160(_goatSafeAddress)));
-        withdrawalCounter = 1;
+        redeemCounter = 1;
     }
 
     /**
@@ -118,7 +118,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /**
      * @dev Generates the `SendParam` used for bridging.
      * @param _amount The amount to be bridged.
-     * @return The generated `SendParam`.
+     * @return sendParam The generated `SendParam`.
      */
     function generateSendParam(
         uint256 _amount
@@ -179,23 +179,23 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             msg.sender
         );
 
-        uint256 mintAmount = _amount * 10 ** (18 - tokenInfo.decimals);
-        IToken(tokenInfo.lpToken).mint(msg.sender, mintAmount);
+        uint256 share = _amount * 10 ** (18 - tokenInfo.decimals);
+        IToken(tokenInfo.lpToken).mint(msg.sender, share);
 
-        emit Deposit(msg.sender, _token, _amount, mintAmount);
+        emit Deposit(msg.sender, _token, _amount, share);
     }
 
     /**
-     * @dev Requests a withdrawal.
-     * @param _requestToken The token to be withdrawn.
-     * @param _receiver The address to receive the withdrawn tokens.
-     * @param _lpAmount The amount of LP tokens to be withdrawn.
-     * @return The ID of the withdrawal request.
+     * @dev Requests a redeem.
+     * @param _requestToken The token to be redeemed.
+     * @param _receiver The address to receive the redeemed tokens.
+     * @param _share The amount of LP tokens to be burned for redeeming the token.
+     * @return id The ID of the redeem request.
      */
-    function requestWithdraw(
+    function requestRedeem(
         address _requestToken,
         address _receiver,
-        uint256 _lpAmount
+        uint256 _share
     ) external returns (uint256 id) {
         require(
             underlyingTokens[_requestToken].lpToken != address(0),
@@ -203,102 +203,98 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         );
         require(_receiver != address(0), "Zero address");
         require(
-            _lpAmount >= underlyingTokens[_requestToken].minWithdrawAmount,
+            _share >= underlyingTokens[_requestToken].minRedeemAmount,
             "Invalid amount"
         );
-        require(!withdrawPaused[_requestToken], "Paused");
+        require(!redeemPaused[_requestToken], "Paused");
 
         IToken(underlyingTokens[_requestToken].lpToken).transferFrom(
             msg.sender,
             address(this),
-            _lpAmount
+            _share
         );
 
-        id = withdrawalCounter++;
-        withdrawalRequests[id] = WithdrawalRequest({
+        id = redeemCounter++;
+        redeemRequests[id] = RedeemRequest({
             isCompleted: false,
             requester: msg.sender,
             receiver: _receiver,
             requestToken: _requestToken,
             timestamp: uint32(block.timestamp),
-            lpAmount: _lpAmount
+            share: _share
         });
 
-        emit WithdrawalRequested(
-            msg.sender,
-            _receiver,
-            _requestToken,
-            id,
-            _lpAmount
-        );
+        emit RedeemRequested(msg.sender, _receiver, _requestToken, id, _share);
     }
 
     /**
-     * @dev Cancels the requested withdrawal.
-     * @param _id The ID of the withdrawal request to be cancelled.
+     * @dev Cancels the requested redeem.
+     * @param _id The ID of the redeem request to be cancelled.
      */
-    function cancelWithdrawal(uint64 _id) external {
-        require(_id > processedWithdrawalCounter, "Already processed");
-        WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
-        address requester = withdrawalRequest.requester;
+    function cancelRedeem(uint64 _id) external {
+        require(_id > processedRedeemCounter, "Already processed");
+        RedeemRequest memory redeemRequest = redeemRequests[_id];
+        address requester = redeemRequest.requester;
         require(msg.sender == requester, "Wrong requester");
 
-        IToken(underlyingTokens[withdrawalRequest.requestToken].lpToken)
-            .transfer(requester, withdrawalRequest.lpAmount);
-
-        delete withdrawalRequests[_id];
-        emit WithdrawalCancelled(
+        IToken(underlyingTokens[redeemRequest.requestToken].lpToken).transfer(
             requester,
-            withdrawalRequest.requestToken,
+            redeemRequest.share
+        );
+
+        delete redeemRequests[_id];
+        emit RedeemCancelled(
+            requester,
+            redeemRequest.requestToken,
             _id,
-            withdrawalRequest.lpAmount
+            redeemRequest.share
         );
     }
 
     /**
-     * @dev Allows users to claim their requested withdrawals up to `_id`th withdrawal.
-     * @param _id The ID up to which withdrawal request to be processed.
+     * @dev Allows users to claim their requested redeems up to `_id`th redeem.
+     * @param _id The ID up to which redeem request to be processed.
      */
     function processUntil(uint64 _id) external onlyRole(ADMIN_ROLE) {
         require(
-            _id > processedWithdrawalCounter && _id < withdrawalCounter,
+            _id > processedRedeemCounter && _id < redeemCounter,
             "Invalid id"
         );
-        processedWithdrawalCounter = _id;
-        emit WithdrawalProcessed(_id);
+        processedRedeemCounter = _id;
+        emit RedeemProcessed(_id);
     }
 
     /**
-     * @dev Claims the processed withdrawal request.
-     * @param _id The ID of the withdrawal request to be claimed.
-     * @notice The requester can claim the withdrawal after the redeem wait period.
+     * @dev Claims the processed redeem request.
+     * @param _id The ID of the redeem request to be claimed.
+     * @notice The requester can claim the redeem after the redeem wait period.
      */
     function claim(uint64 _id) external nonReentrant {
-        require(_id <= processedWithdrawalCounter, "Not processed");
-        WithdrawalRequest memory withdrawalRequest = withdrawalRequests[_id];
-        require(!withdrawalRequest.isCompleted, "Already completed");
+        require(_id <= processedRedeemCounter, "Not processed");
+        RedeemRequest memory redeemRequest = redeemRequests[_id];
+        require(!redeemRequest.isCompleted, "Already completed");
         require(
-            withdrawalRequest.timestamp + redeemWaitPeriod <= block.timestamp,
+            redeemRequest.timestamp + redeemWaitPeriod <= block.timestamp,
             "Time not reached"
         );
 
-        address requester = withdrawalRequest.requester;
+        address requester = redeemRequest.requester;
         require(msg.sender == requester, "Wrong requester");
-        withdrawalRequests[_id].isCompleted = true;
+        redeemRequests[_id].isCompleted = true;
 
-        uint256 lpAmount = withdrawalRequest.lpAmount;
-        address requestToken = withdrawalRequest.requestToken;
-        uint256 underlyingAmount = lpAmount /
+        uint256 share = redeemRequest.share;
+        address requestToken = redeemRequest.requestToken;
+        uint256 underlyingAmount = share /
             (10 ** (18 - underlyingTokens[requestToken].decimals));
         require(
             underlyingAmount <= IToken(requestToken).balanceOf(address(this)),
             "Insufficient tokens"
         );
-        address receiver = withdrawalRequest.receiver;
+        address receiver = redeemRequest.receiver;
 
         IToken(underlyingTokens[requestToken].lpToken).burn(
             address(this),
-            lpAmount
+            share
         );
         IToken(requestToken).transfer(receiver, underlyingAmount);
         emit Claim(
@@ -306,7 +302,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             requester,
             receiver,
             requestToken,
-            lpAmount,
+            share,
             underlyingAmount
         );
     }
@@ -316,13 +312,13 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _token The underlying token address.
      * @param _bridge The OFT/adapter for the underlying token.
      * @param _minDepositAmount The minimum deposit amount, in underlying token.
-     * @param _minWithdrawAmount The minimum withdraw amount, in LP token.
+     * @param _minRedeemAmount The minimum redeem amount, in LP token.
      */
     function addUnderlyingToken(
         address _token,
         address _bridge,
         uint256 _minDepositAmount,
-        uint256 _minWithdrawAmount
+        uint256 _minRedeemAmount
     ) external onlyRole(ADMIN_ROLE) {
         require(_token != address(0), "Invalid token");
         require(underlyingTokens[_token].lpToken == address(0), "Token exists");
@@ -345,7 +341,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             lpToken: address(lpToken),
             bridge: _bridge,
             minDepositAmount: _minDepositAmount,
-            minWithdrawAmount: _minWithdrawAmount
+            minRedeemAmount: _minRedeemAmount
         });
         lpToUnderlyingTokens[address(lpToken)] = _token;
 
@@ -400,16 +396,16 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Sets the withdraw pause state.
+     * @dev Sets the redeem pause state.
      * @param _token The token address.
      * @param _pause The pause state.
      */
-    function setWithdrawPause(
+    function setRedeemPause(
         address _token,
         bool _pause
     ) external onlyRole(ADMIN_ROLE) {
-        withdrawPaused[_token] = _pause;
-        emit SetWithdrawPause(_token, _pause);
+        redeemPaused[_token] = _pause;
+        emit SetRedeemPause(_token, _pause);
     }
 
     /**
