@@ -73,6 +73,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    uint32 public constant MAX_REDEEM_WAIT_PERIOD = 30 days;
     uint32 public immutable eid; // Layer Zero destination endpoint id
 
     // bytes32 format of token receiving address on Goat network
@@ -102,12 +103,18 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @dev Initializes the contract with the given Goat safe address.
      * @param _goatSafeAddress The Goat safe address.
      */
-    function initialize(address _goatSafeAddress) public initializer {
+    function initialize(
+        address _goatSafeAddress,
+        uint32 _redeemWaitPeriod
+    ) public initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         goatSafeAddress = bytes32(uint256(uint160(_goatSafeAddress)));
         redeemCounter = 1;
+        redeemWaitPeriod = _redeemWaitPeriod < MAX_REDEEM_WAIT_PERIOD
+            ? _redeemWaitPeriod
+            : MAX_REDEEM_WAIT_PERIOD;
     }
 
     /**
@@ -446,6 +453,10 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function setRedeemWaitPeriod(
         uint32 _redeemWaitPeriod
     ) external onlyRole(ADMIN_ROLE) {
+        require(
+            _redeemWaitPeriod <= MAX_REDEEM_WAIT_PERIOD,
+            "Wait period too long"
+        );
         redeemWaitPeriod = _redeemWaitPeriod;
         emit SetRedeemWaitPeriod(_redeemWaitPeriod);
     }
