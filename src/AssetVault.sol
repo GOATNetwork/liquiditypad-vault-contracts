@@ -372,7 +372,7 @@ contract AssetVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         // remove underlying token from list
         address[] memory tokens = underlyingTokenList;
         uint256 length = tokens.length;
-        for (uint8 i; i < length; i++) {
+        for (uint256 i; i < length; i++) {
             if (tokens[i] == _token) {
                 underlyingTokenList[i] = underlyingTokenList[length - 1];
                 underlyingTokenList.pop();
