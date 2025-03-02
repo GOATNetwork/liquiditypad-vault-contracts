@@ -35,15 +35,16 @@ contract Deploy is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        deploy();
+        deploy(true);
     }
 
-    function deploy() public {
+    function deploy(bool _isLogic) public {
         AssetVault vault = new AssetVault(eid);
-        vault.initialize(deployer, 0);
-        vault.grantRole(vault.ADMIN_ROLE(), deployer);
-
-        vault.addUnderlyingToken(token, oft, MIN_AMOUNT, MIN_AMOUNT);
+        if (!_isLogic) {
+            vault.initialize(deployer, 0);
+            vault.grantRole(vault.ADMIN_ROLE(), deployer);
+            vault.addUnderlyingToken(token, oft, MIN_AMOUNT, MIN_AMOUNT);
+        }
 
         console.log("Vault: ", address(vault));
     }
